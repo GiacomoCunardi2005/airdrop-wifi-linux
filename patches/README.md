@@ -16,5 +16,6 @@ Build only the driver directory against your running kernel (clang-built kernels
     make -C /usr/lib/modules/$(uname -r)/build M=$PWD/drivers/net/wireless/intel/iwlwifi LLVM=1 \
          CONFIG_IWLWIFI=m CONFIG_IWLMVM=m CONFIG_IWLMLD=m modules
 
-Loading is done by `scripts/awdl-coex-test`, which always restores the stock modules and arms a rollback timer.
+Loading is done by `scripts/awdl-coex-test`, which arms a rollback timer and attempts to restore the stock modules
+and reconnect on exit. Recovery failures are reported; the timer remains armed if cleanup fails.
 This can crash the firmware or the kernel. Save your work first.

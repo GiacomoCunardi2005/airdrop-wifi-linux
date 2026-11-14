@@ -47,6 +47,25 @@ router on 5 GHz channel 100 (DFS, 80 MHz). Phone: iPhone 16 Pro, iOS 27. All fro
   **46 of them AWDL** from the phone. Gateway latency rises from ~3 ms to ~20 ms average (time sharing).
 - No firmware errors in that run.
 
+## 8. First receive attempt with the station connected (2026-11-14, 21:39–21:41 CET)
+- The PC did not appear in the phone's AirDrop list. OpenDrop announced its service but received **zero requests**.
+- Gateway ping: **114/114 replies, 0% loss**, average 20.762 ms, maximum 198.026 ms. This measures gateway
+  reachability during the receive attempt, not uninterrupted Internet connectivity throughout setup and teardown.
+- Last OWL counters: `tx_action 2654`, `tx_data 54` (all multicast), `tx_unicast 0`, `rx_action 239`, `rx_data 2`.
+- The `awdl0` capture contains 40 packets: 36 mDNS and 4 ICMPv6, **no TCP**. Only two mDNS packets come from
+  the peer. This establishes reception of some AWDL traffic, not successful delivery of our announcements to the phone.
+- The JPEG listed at the end predates this attempt. The successful 17:24 CET transfer is recorded in the Owly
+  receive log; `airdrop-owly` selects that configuration without extra flags. Shell history also contains an
+  `airdrop-ricevi` invocation at 17:21, but that is not the receiver named by the successful transfer log.
+- The script printed `disconnected` after teardown; a later check showed the station connected again.
+  The exact cause of the delayed recovery is unproven. Cleanup now waits for the interface, restores NetworkManager
+  management, exposes reconnect errors, and keeps the rollback timer on failure. It no longer substitutes PID 0
+  for missing background processes. The test aborts if the safety timer cannot be armed.
+- Subsequent receive attempts also capture `awdlmon` locally to inspect radio traffic alongside `awdl0`.
+  Neither raw captures nor identifying logs are committed. Missing ACKs remain a hypothesis for this attempt;
+  the available capture alone cannot establish the cause of failed discovery.
+
 ## Open
-- Receive a file while connected (`AIRDROP=1 awdl-coex-test`): expected to hit the missing-ACK problem again.
+- Receive a file while connected. First investigate discovery with the paired radio and `awdl0` captures
+  from `AIRDROP=1 awdl-coex-test`; distinguish local announcements from radio transmission and peer responses.
 - Getting the firmware to ACK for the listener context (peer stations / IBSS-like context next to the station).

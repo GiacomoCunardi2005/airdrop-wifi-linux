@@ -1,38 +1,60 @@
 #!/bin/bash
 # SPERIMENTALE. Prima: salva il lavoro, riavvia, esegui in un terminale normale (non con "!").
 # Carica iwlwifi/iwlmvm MODIFICATI (awdl_coex=1) e misura se la station resta connessa mentre un monitor sul
-# canale 6 riceve frame AWDL (iPhone: Condividi → AirDrop aperto durante la misura). Ripristina SEMPRE i moduli originali.
-set -u
+# canale 6 riceve frame AWDL (iPhone: Condividi → AirDrop aperto durante la misura). Tenta il ripristino all'uscita.
+set -uo pipefail
 SRC=~/awdl-diag/linux-coex/drivers/net/wireless/intel/iwlwifi
 WLAN=${WLAN:-wlan0}
 OUT=~/awdl-diag; STAMP=$(date +%Y%m%d-%H%M%S)
 exec > >(tee -a "$OUT/coex-test-$STAMP.log") 2>&1
 
 restore() {
+    local restored=1 pid
     trap - EXIT
+    trap '' INT TERM HUP
     echo "== RIPRISTINO moduli originali"
-    sudo pkill -x owl 2>/dev/null; kill "${CAP:-0}" "${PINGPID:-0}" 2>/dev/null
+    sudo pkill -x owl 2>/dev/null
+    for pid in "${CAP:-}" "${MONCAP:-}" "${PINGPID:-}"; do
+        [[ -n $pid ]] && kill "$pid" 2>/dev/null
+    done
     sudo ip6tables -w 5 -D INPUT -i awdl0 -s fe80::/10 -p tcp --dport 8771 -m comment --comment awdl-coex -j ACCEPT 2>/dev/null
     sudo ip6tables -w 5 -D INPUT -i awdl0 -s fe80::/10 -p udp --dport 5353 -m comment --comment awdl-coex -j ACCEPT 2>/dev/null
     sudo iw dev awdlmon del 2>/dev/null
-    sudo rmmod iwlmvm iwlwifi 2>/dev/null
-    sudo modprobe iwlmvm
-    sudo nmcli radio wifi on; sleep 3; sudo nmcli device connect "$WLAN" >/dev/null 2>&1
-    sudo systemctl stop awdl-coex-rollback.timer 2>/dev/null
-    sudo kill "${KMSG:-0}" "${KSYNC:-0}" 2>/dev/null
+    if sudo rmmod iwlmvm iwlwifi && sudo modprobe iwlmvm; then
+        for _ in {1..30}; do ip link show "$WLAN" &>/dev/null && break; sleep 1; done
+        if ! { sudo nmcli radio wifi on &&
+               sudo nmcli device set "$WLAN" managed yes &&
+               sudo nmcli --wait 30 device connect "$WLAN"; }; then
+            restored=0
+        fi
+    else
+        restored=0
+    fi
+    if [[ $restored == 1 ]]; then
+        sudo systemctl stop awdl-coex-rollback.timer 2>/dev/null
+    else
+        echo "Ripristino incompleto: timer di emergenza lasciato attivo."
+    fi
+    for pid in "${KMSG:-}" "${KSYNC:-}"; do
+        [[ -n $pid ]] && sudo kill "$pid" 2>/dev/null
+    done
     echo "Wi-Fi: $(nmcli -t -f DEVICE,STATE device | grep "^$WLAN")  | log: $OUT/coex-test-$STAMP.log"
+    [[ $restored == 1 ]] || exit 1
 }
 sudo -v || exit 1
 [[ ${AIRDROP:-0} == 1 ]] && RB=480   # AIRDROP=1: prova di ricezione vera, rollback dopo 8 minuti
 [[ $(modinfo -F vermagic "$SRC/mvm/iwlmvm.ko") == "$(modinfo -F vermagic iwlmvm)" ]] || { echo "vermagic diverso: stop"; exit 1; }
 GW=$(ip route show default dev "$WLAN" | awk '{print $3; exit}'); [[ -n $GW ]] || { echo "station non connessa: stop"; exit 1; }
 echo "Gateway $GW, canale station: $(iw dev "$WLAN" info | awk '/channel/ {print $2, $3, $4}')"
-sudo dmesg -w -T > "$OUT/coex-kernel-$STAMP.log" 2>&1 & KMSG=$!
-( while sleep 1; do sync "$OUT/coex-kernel-$STAMP.log"; done ) & KSYNC=$!
 # rete di sicurezza: tra 4 minuti rimette comunque i moduli originali, anche se lo script si blocca
 sudo systemd-run --unit=awdl-coex-rollback --on-active=${RB:-240} /bin/bash -c \
-  'rmmod iwlmvm iwlwifi 2>/dev/null; modprobe iwlmvm; sleep 3; systemctl restart NetworkManager' >/dev/null
+  'rmmod iwlmvm iwlwifi 2>/dev/null; modprobe iwlmvm; sleep 3; systemctl restart NetworkManager' >/dev/null || \
+  { echo "Timer di emergenza non attivato: stop"; exit 1; }
 trap restore EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM HUP
+sudo dmesg -w -T > "$OUT/coex-kernel-$STAMP.log" 2>&1 & KMSG=$!
+( while sleep 1; do sync "$OUT/coex-kernel-$STAMP.log"; done ) & KSYNC=$!
 
 echo "== baseline (station originale): ping $GW"; ping -c 8 -i 0.5 -q "$GW" | tail -2
 echo "== carico moduli modificati"
@@ -81,10 +103,11 @@ if [[ ${AIRDROP:-0} == 1 ]]; then
     ip link show awdl0 &>/dev/null || { echo "awdl0 non creata (vedi $OUT/coex-owl-$STAMP.log)"; exit 0; }
     ping -i 1 -c 170 -q "$GW" > "$OUT/coex-ping-$STAMP.txt" 2>&1 & PINGPID=$!
     tshark -i awdl0 -w "$OUT/coex-awdl0-$STAMP.pcap" -q 2>/dev/null & CAP=$!
+    tshark -i awdlmon -w "$OUT/coex-radio-$STAMP.pcap" -q 2>/dev/null & MONCAP=$!
     export AIRDROP_CONFIRM=~/.local/bin/airdrop-conferma OPENDROP_ANNOUNCE_INTERVAL=5
     echo ">>> ADESSO (circa 3 minuti): iPhone con AirDrop su 'Tutti per 10 minuti' → Condividi → AirDrop → $(hostname). Internet resta attivo."
     ( cd "$DEST" && timeout --foreground 170 "$OPENDROP" receive -i awdl0 -n "$(hostname)" -d 2>&1 | grep --line-buffered -v pkg_resources | tee "$OUT/coex-opendrop-$STAMP.log" )
-    kill "$CAP" 2>/dev/null; sudo pkill -x owl; wait "$PINGPID"
+    kill "$CAP" "$MONCAP" 2>/dev/null; sudo pkill -x owl; wait "$PINGPID"
     echo "== ping durante AirDrop:"; tail -2 "$OUT/coex-ping-$STAMP.txt"
     echo "== OWL:"; grep -E 'STATS|add peer' "$OUT/coex-owl-$STAMP.log" | tail -4
     echo "== richieste AirDrop: $(grep -c -E 'POST request at' "$OUT/coex-opendrop-$STAMP.log")"

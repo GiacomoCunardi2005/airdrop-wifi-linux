@@ -13,7 +13,7 @@ firmware 89), CachyOS, kernel 7.3.4, iPhone 16 Pro on iOS 27.
 |---|---|
 | Receive a photo from an iPhone (iOS 27), Wi-Fi **disconnected** during the session | **Works** with [Owly](https://github.com/t4t5/owly) in exclusive mode (`scripts/airdrop-owly`) |
 | Radio hears AWDL **while the station stays connected** to the router | **Works** with the experimental driver patch: 40/40 pings to the gateway, 46 AWDL frames in 20 s |
-| Receive a file **while Wi-Fi stays connected** | **Not yet.** Next test: `AIRDROP=1 scripts/awdl-coex-test` |
+| Receive a file **while Wi-Fi stays connected** | **Failed first attempt:** PC absent from the phone's list, zero AirDrop requests; gateway ping 114/114 |
 | Send PC → iPhone, large files, long-term stability | Not tested |
 
 ## Why this is hard
@@ -31,8 +31,8 @@ See [docs/FINDINGS.md](docs/FINDINGS.md) for what was measured, in order, includ
 
 - `scripts/airdrop-owly` — the receive path that works today (takes the Wi-Fi card for up to 5 minutes).
 - `scripts/awdl-coex-test` — loads the patched driver, puts a monitor on channel 6 next to the connected station,
-  measures ping + AWDL frames, then **always** restores the stock modules (plus a rollback timer).
-  `AIRDROP=1` runs a real receive attempt on top.
+  measures ping + AWDL frames, then attempts to restore the stock modules and reconnect (plus a rollback timer).
+  `AIRDROP=1` runs a real receive attempt and captures both `awdl0` and the monitor radio locally.
 - `scripts/airdrop-ricevi`, `scripts/airdrop-conferma`, `scripts/awdl-diag` — the earlier OWL + OpenDrop path and
   diagnostics (monitor-only, no ACKs: the phone contacts the PC but never lists it on this card).
 - `patches/` — the experimental `iwlwifi` patch (GPL-2.0), see `patches/README.md`.
