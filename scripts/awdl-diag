@@ -1,0 +1,30 @@
+#!/bin/bash
+# Cattura 20s di traffico per canale AWDL (6, 149, 44) in pcap, poi ripristina il Wi-Fi.
+# Durante: tieni aperto Condividi → AirDrop sull'iPhone vicino al PC.
+WLAN=${WLAN:-wlan0}
+MON=${WLAN}mon
+SECS=${SECS:-20}
+OUT=~/awdl-diag; mkdir -p "$OUT"
+
+cleanup() {
+    echo "Ripristino Wi-Fi..."
+    sudo airmon-ng stop "$MON" >/dev/null
+    sudo nmcli device set "$WLAN" managed yes
+}
+trap cleanup EXIT
+
+sudo -v || exit 1
+sudo nmcli device set "$WLAN" managed no; sleep 1
+# iw set type monitor su iwlwifi non riceve nulla: serve una vif monitor separata (come fa airmon-ng)
+sudo airmon-ng start "$WLAN" >/dev/null
+ip link show "$MON" &>/dev/null || { echo "$MON non creata"; exit 1; }
+
+for ch in 6 149 44; do
+    sudo iw dev "$MON" set channel "$ch" || { echo "canale $ch non impostabile"; continue; }
+    echo "Canale $ch: catturo ${SECS}s..."
+    tshark -i "$MON" -a duration:"$SECS" -w "$OUT/ch$ch.pcap" -q
+    tot=$(tshark -r "$OUT/ch$ch.pcap" -Y wlan 2>/dev/null | wc -l)
+    awdl=$(tshark -r "$OUT/ch$ch.pcap" -Y 'wlan.bssid == 00:25:00:ff:94:73' 2>/dev/null | wc -l)
+    echo "  frame 802.11: $tot — frame AWDL: $awdl"
+done
+echo "File in $OUT"

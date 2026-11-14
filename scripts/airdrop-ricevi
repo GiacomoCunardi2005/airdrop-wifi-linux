@@ -1,0 +1,126 @@
+#!/bin/bash
+# Ricevi via AirDrop da iPhone (iOS 26/27) con i fork verificati jedbillyb/owl + jedbillyb/opendrop.
+# Sull'iPhone: AirDrop → "Tutti per 10 minuti". Senza internet finché è attivo. Ctrl+C per uscire.
+# Config che ha funzionato (iPhone ha fatto /Discover): monitor via airmon-ng, OWL -N su canale 6, strategia intersect.
+# NIENTE AP nascosto / wpa_supplicant: con quello la scheda restava sorda (rx_action 0).
+WLAN=${WLAN:-wlan0}
+MON=${WLAN}mon
+CHAN=${CHAN:-6}          # unico canale dove iwlwifi può trasmettere senza AP (44/149 sono "no IR")
+STRATEGY=${STRATEGY:-intersect}   # annuncia solo gli slot sul nostro canale
+DEST=${DEST:-$(xdg-user-dir DOWNLOAD)/AirDrop}
+OWL=~/.local/src/owl-jed/build/daemon/owl
+OPENDROP=~/.local/src/opendrop-jed/.venv/bin/opendrop
+export AIRDROP_CONFIRM=~/.local/bin/airdrop-conferma   # chiedi prima di accettare ogni file
+export OPENDROP_ANNOUNCE_INTERVAL=${OPENDROP_ANNOUNCE_INTERVAL:-5}
+
+[[ -x $OWL && -x $OPENDROP ]] || { echo "Fork non compilati: manca $OWL o $OPENDROP"; exit 1; }
+
+fw() {  # regola temporanea, solo link-local su awdl0 (ufw resta intatto)
+    sudo ip6tables -w 5 "$1" INPUT -i awdl0 -s fe80::/10 -p "$2" --dport "$3" \
+        -m comment --comment airdrop-ricevi -j ACCEPT
+}
+
+cleanup() {
+    kill "$TIMER" "$CAP" "$KSYNC" 2>/dev/null
+    echo; echo "Ripristino Wi-Fi e firewall..."
+    fw -D tcp 8771 2>/dev/null; fw -D udp 5353 2>/dev/null
+    sudo pkill -x owl
+    [[ -n ${CTX_PID:-} ]] && sudo kill "$CTX_PID" 2>/dev/null
+    sudo iw dev actx del 2>/dev/null
+    [[ -n ${CTX_DIR:-} ]] && sudo rm -rf -- "$CTX_DIR"
+    sudo airmon-ng stop "$MON" >/dev/null 2>&1
+    sudo nmcli device set "$WLAN" managed yes
+    # log kernel ancora acceso: un crash firmware iwlwifi è già avvenuto proprio nel ripristino
+    sleep 3; sudo kill "$KMSG" 2>/dev/null; sync "$KLOG" 2>/dev/null
+    echo "Log kernel: $KLOG"
+}
+# ⛔ NON USARE su Intel AX211 / iwlwifi (provato 14/11, 2 volte): con l'AP attivo il monitor non riceve nulla (rx_action 0).
+# OPZIONALE (ACK_CTX=1, sperimentale): AP nascosto su interfaccia SEPARATA "actx" con lo STESSO MAC del monitor.
+# Il monitor puro non manda ACK 802.11 → l'iPhone ritrasmette ogni frame 7x (visto in cattura: ~8 copie di ogni pacchetto).
+# Un AP attivo sul canale 6 fa rispondere l'hardware con gli ACK ai frame indirizzati al nostro MAC.
+# Idea di 1raad1/airdrop-linux (lì Realtek ch44). Il monitor resta creato da airmon-ng (config che riceve).
+# Niente DHCP/routing: solo radio. Chiave casuale, config in /run (root), cancellata all'uscita.
+start_ack_context() {
+    command -v wpa_supplicant >/dev/null || return 1
+    local phy mac secret
+    phy=phy$(iw dev "$MON" info | awk '/wiphy/ {print $2}')
+    mac=$(cat "/sys/class/net/$MON/address")
+    sudo iw phy "$phy" interface add actx type managed || return 1
+    sudo nmcli device set actx managed no 2>/dev/null
+    sudo ip link set dev actx address "$mac" || { echo "   MAC del monitor non assegnabile all'AP: niente ACK"; return 1; }
+    CTX_DIR=$(sudo mktemp -d /run/airdrop-ctx.XXXXXX) || return 1
+    secret=$(openssl rand -hex 32)
+    sudo tee "$CTX_DIR/config" >/dev/null <<EOF
+ap_scan=2
+network={
+    ssid="ad-${secret:0:10}"
+    mode=2
+    frequency=2437
+    ignore_broadcast_ssid=1
+    key_mgmt=WPA-PSK
+    proto=RSN
+    pairwise=CCMP
+    group=CCMP
+    psk="${secret:0:63}"
+}
+EOF
+    sudo chmod 600 "$CTX_DIR/config"
+    sudo wpa_supplicant -D nl80211 -i actx -c "$CTX_DIR/config" > /tmp/airdrop-ctx.log 2>&1 &
+    CTX_PID=$!
+    for _ in {1..50}; do grep -q AP-ENABLED /tmp/airdrop-ctx.log && return 0; sleep 0.1; done
+    return 1
+}
+trap cleanup EXIT
+
+sudo -v || exit 1
+
+# --- log kernel su disco, con fsync ogni secondo (il trace del panic lo salva EFI pstore) ---
+mkdir -p ~/awdl-diag
+KLOG=~/awdl-diag/kernel-$(date +%Y%m%d-%H%M%S).log
+sudo dmesg -w -T > "$KLOG" 2>&1 &   # dmesg_restrict=1: serve root
+KMSG=$!
+( while sleep 1; do sync "$KLOG"; done ) &
+KSYNC=$!
+
+fw -I tcp 8771; fw -I udp 5353
+echo "Stacco $WLAN da NetworkManager (internet off)..."
+sudo nmcli device set "$WLAN" managed no
+sleep 1
+# iw set type monitor su iwlwifi non riceve nulla: vif monitor separata via airmon-ng
+# (rimuove anche la vif station: configurazione con cui la scheda riceveva AWDL).
+sudo airmon-ng start "$WLAN" >/dev/null
+ip link show "$MON" &>/dev/null || { echo "$MON non creata"; exit 1; }
+if [[ ${ACK_CTX:-0} == 1 ]]; then
+    if start_ack_context; then echo "✅ Contesto ACK attivo (AP nascosto su actx, ch6, MAC $(cat /sys/class/net/actx/address))"
+    else echo "⚠️  Contesto ACK non partito, continuo col monitor semplice (log: /tmp/airdrop-ctx.log)"
+         [[ -n ${CTX_PID:-} ]] && sudo kill "$CTX_PID" 2>/dev/null; CTX_PID=; sudo iw dev actx del 2>/dev/null
+    fi
+fi
+
+LOG=$(mktemp)
+# log completo in $LOG; a schermo solo le righe utili
+sudo "$OWL" -i "$MON" -c "$CHAN" -S "$STRATEGY" -N -f -v |& tee "$LOG" \
+    | grep --line-buffered -v -E 'unhandled frame|unexpected bytes|switch channel|set_channel|changed channel sequence|GATE slot|intersect:|following channel' &
+START=$SECONDS
+( while sleep 10; do
+    printf '⏱  %ds — peer: %d — connessioni AirDrop: %d — rx_action: %s\n' $((SECONDS-START)) \
+        "$(grep -c 'add peer' "$LOG")" \
+        "$(cat "$DEST/.opendrop.log" 2>/dev/null | grep -c -E '/Discover|/Ask|/Upload')" \
+        "$(grep 'STATS' "$LOG" | tail -1 | sed -E 's/.*rx_action ([0-9]+).*/\1/')"
+  done ) &
+TIMER=$!
+for _ in {1..10}; do ip link show awdl0 &>/dev/null && break; sleep 1; done
+ip link show awdl0 &>/dev/null || { echo "awdl0 non creata: OWL non è partito."; exit 1; }
+# aspetta fine DAD: con IPv6 "tentative" il socket mDNS non si lega
+for _ in {1..15}; do
+    ip -6 addr show dev awdl0 scope link | grep -q inet6 && ! ip -6 addr show dev awdl0 | grep -q tentative && break
+    sleep 1
+done
+
+tshark -i awdl0 -w ~/awdl-diag/awdl0.pcap -q 2>/dev/null &   # diagnosi
+CAP=$!
+
+mkdir -p "$DEST" && cd "$DEST" || exit 1
+echo "Pronto. iPhone: AirDrop su 'Tutti per 10 minuti', poi Condividi → AirDrop → $(hostname). File in: $DEST"
+echo "Se dopo 30s rx_action resta 0, la scheda è sorda: Ctrl+C e riavvia prima di riprovare."
+"$OPENDROP" receive -i awdl0 -n "$(hostname)" -d 2>&1 | tee "$DEST/.opendrop.log" | grep -v pkg_resources

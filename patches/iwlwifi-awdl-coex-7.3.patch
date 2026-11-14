@@ -1,0 +1,174 @@
+diff --git a/drivers/net/wireless/intel/iwlwifi/iwl-drv.c b/drivers/net/wireless/intel/iwlwifi/iwl-drv.c
+index 7f1515d..724c8ef 100644
+--- a/drivers/net/wireless/intel/iwlwifi/iwl-drv.c
++++ b/drivers/net/wireless/intel/iwlwifi/iwl-drv.c
+@@ -2217,5 +2217,8 @@ module_param_named(disable_11ax, iwlwifi_mod_params.disable_11ax, bool,
+ 		   S_IRUGO);
+ MODULE_PARM_DESC(disable_11ax, "Disable HE capabilities (default: false)");
+ 
++module_param_named(awdl_coex, iwlwifi_mod_params.awdl_coex, bool, 0444);
++MODULE_PARM_DESC(awdl_coex, "Experimental AWDL listener coexistence, PCI 8086:7e40 only");
++
+ module_param_named(disable_11be, iwlwifi_mod_params.disable_11be, bool, 0444);
+ MODULE_PARM_DESC(disable_11be, "Disable EHT capabilities (default: false)");
+diff --git a/drivers/net/wireless/intel/iwlwifi/iwl-modparams.h b/drivers/net/wireless/intel/iwlwifi/iwl-modparams.h
+index 0476df7..312d441 100644
+--- a/drivers/net/wireless/intel/iwlwifi/iwl-modparams.h
++++ b/drivers/net/wireless/intel/iwlwifi/iwl-modparams.h
+@@ -86,6 +86,8 @@ struct iwl_mod_params {
+ 	bool remove_when_gone;
+ 	u32 enable_ini;
+ 	bool disable_11be;
++	/** @awdl_coex: experimental concurrent listener on PCI 8086:7e40 */
++	bool awdl_coex;
+ };
+ 
+ static inline bool iwl_enable_rx_ampdu(void)
+diff --git a/drivers/net/wireless/intel/iwlwifi/mvm/mac-ctxt.c b/drivers/net/wireless/intel/iwlwifi/mvm/mac-ctxt.c
+index b2c5be2..19aa97d 100644
+--- a/drivers/net/wireless/intel/iwlwifi/mvm/mac-ctxt.c
++++ b/drivers/net/wireless/intel/iwlwifi/mvm/mac-ctxt.c
+@@ -748,8 +748,22 @@ static int iwl_mvm_mac_ctxt_cmd_listener(struct iwl_mvm *mvm,
+ 				       MAC_FILTER_IN_PROBE_REQUEST |
+ 				       MAC_FILTER_IN_CRC32 |
+ 				       MAC_FILTER_ACCEPT_GRP);
++	if (iwlwifi_mod_params.awdl_coex) {
++		static const u8 awdl_bssid[ETH_ALEN] =
++			{ 0x00, 0x25, 0x00, 0xff, 0x94, 0x73 };
++
++		ether_addr_copy(cmd.bssid_addr, awdl_bssid);
++		cmd.filter_flags = cpu_to_le32(MAC_FILTER_ACCEPT_GRP);
++		/* Enable data RX only after a separate channel has been bound. */
++		if (iwl_mvm_vif_from_mac80211(vif)->monitor_active)
++			cmd.filter_flags |= cpu_to_le32(MAC_FILTER_IN_PROMISC |
++						      MAC_FILTER_IN_CONTROL_AND_MGMT);
++	}
+ 	ieee80211_hw_set(mvm->hw, RX_INCLUDES_FCS);
+ 
++	if (action != FW_CTXT_ACTION_ADD)
++		return iwl_mvm_mac_ctxt_send_cmd(mvm, &cmd);
++
+ 	/*
+ 	 * the queue mask is only relevant for old TX API, and
+ 	 * mvm->snif_queue isn't set here (it's still set to
+diff --git a/drivers/net/wireless/intel/iwlwifi/mvm/mac80211.c b/drivers/net/wireless/intel/iwlwifi/mvm/mac80211.c
+index 5bd246e..63d5056 100644
+--- a/drivers/net/wireless/intel/iwlwifi/mvm/mac80211.c
++++ b/drivers/net/wireless/intel/iwlwifi/mvm/mac80211.c
+@@ -350,6 +350,15 @@ int iwl_mvm_mac_setup_register(struct iwl_mvm *mvm)
+ 	ieee80211_hw_set(hw, SPECTRUM_MGMT);
+ 	ieee80211_hw_set(hw, REPORTS_TX_ACK_STATUS);
+ 	ieee80211_hw_set(hw, WANT_MONITOR_VIF);
++	if (iwlwifi_mod_params.awdl_coex) {
++		IWL_ERR(mvm, "awdl_coex check: dev=0x%x rxqs=%u mld_api=%d\n",
++			iwl_trans_get_device_id(mvm->trans),
++			mvm->trans->info.num_rxqs, mvm->mld_api_is_used);
++		if (iwl_trans_get_device_id(mvm->trans) != 0x7e40 ||
++		    mvm->trans->info.num_rxqs != 1)
++			return -EOPNOTSUPP;
++		ieee80211_hw_set(hw, NO_VIRTUAL_MONITOR);
++	}
+ 	ieee80211_hw_set(hw, SUPPORTS_PS);
+ 	ieee80211_hw_set(hw, SUPPORTS_DYNAMIC_PS);
+ 	ieee80211_hw_set(hw, AMPDU_AGGREGATION);
+@@ -1693,6 +1702,11 @@ static int iwl_mvm_mac_add_interface(struct ieee80211_hw *hw,
+ 
+ 	mutex_lock(&mvm->mutex);
+ 
++	if (iwlwifi_mod_params.awdl_coex &&
++	    vif->type == NL80211_IFTYPE_MONITOR && mvm->monitor_on) {
++		ret = -EBUSY;
++		goto out_unlock;
++	}
+ 	iwl_mvm_mac_init_mvmvif(mvm, mvmvif);
+ 
+ 	mvmvif->mvm = mvm;
+@@ -5033,6 +5047,19 @@ static int __iwl_mvm_assign_vif_chanctx(struct iwl_mvm *mvm,
+ 	if (WARN_ON(!link_conf))
+ 		return -EINVAL;
+ 
++	if (iwlwifi_mod_params.awdl_coex &&
++	    vif->type == NL80211_IFTYPE_MONITOR) {
++		struct ieee80211_vif *sta = iwl_mvm_get_bss_vif(mvm);
++		struct cfg80211_chan_def *def = iwl_mvm_chanctx_def(mvm, ctx);
++
++		/* Promiscuous listening on the station's channel steals its traffic. */
++		if (IS_ERR_OR_NULL(sta) || !sta->cfg.assoc ||
++		    !sta->bss_conf.chanreq.oper.chan ||
++		    sta->bss_conf.chanreq.oper.chan == def->chan) {
++			ret = -EBUSY;
++			goto out;
++		}
++	}
+ 	if (__iwl_mvm_assign_vif_chanctx_common(mvm, vif, ctx,
+ 						switching_chanctx, &ret))
+ 		goto out;
+@@ -5061,6 +5088,14 @@ static int __iwl_mvm_assign_vif_chanctx(struct iwl_mvm *mvm,
+ 		if (ret)
+ 			goto out_remove_binding;
+ 
++		if (iwlwifi_mod_params.awdl_coex) {
++			ret = iwl_mvm_mac_ctxt_changed(mvm, vif, false, NULL);
++			if (ret) {
++				iwl_mvm_rm_snif_sta(mvm, vif);
++				goto out_remove_binding;
++			}
++		}
++
+ 	}
+ 
+ 	/* Handle binding during CSA */
+diff --git a/drivers/net/wireless/intel/iwlwifi/mvm/mld-mac80211.c b/drivers/net/wireless/intel/iwlwifi/mvm/mld-mac80211.c
+index 6ea9a7c..37c6432 100644
+--- a/drivers/net/wireless/intel/iwlwifi/mvm/mld-mac80211.c
++++ b/drivers/net/wireless/intel/iwlwifi/mvm/mld-mac80211.c
+@@ -81,7 +81,9 @@ static int iwl_mvm_mld_mac_add_interface(struct ieee80211_hw *hw,
+ 
+ 	if (vif->type == NL80211_IFTYPE_MONITOR) {
+ 		mvm->monitor_on = true;
+-		ieee80211_hw_set(mvm->hw, RX_INCLUDES_FCS);
++		/* awdl_coex: keep the driver stripping MIC/CRC, the station shares this RX path */
++		if (!iwlwifi_mod_params.awdl_coex)
++			ieee80211_hw_set(mvm->hw, RX_INCLUDES_FCS);
+ 	}
+ 
+ 	if (!test_bit(IWL_MVM_STATUS_IN_HW_RESTART, &mvm->status))
+@@ -190,6 +192,22 @@ __iwl_mvm_mld_assign_vif_chanctx(struct iwl_mvm *mvm,
+ 	if (WARN_ON_ONCE(!mvmvif->link[link_id]))
+ 		return -EINVAL;
+ 
++	if (iwlwifi_mod_params.awdl_coex &&
++	    vif->type == NL80211_IFTYPE_MONITOR) {
++		struct ieee80211_vif *sta = iwl_mvm_get_bss_vif(mvm);
++
++		/* Promiscuous listening on the station's channel steals its traffic. */
++		/* Station down/unassociated is allowed: cfg80211 only lets us set the
++		 * monitor channel while no other interface runs; the station joins after. */
++		if (!IS_ERR_OR_NULL(sta) && sta->cfg.assoc &&
++		    sta->bss_conf.chanreq.oper.chan == ctx->def.chan) {
++			IWL_ERR(mvm, "awdl_coex: monitor chanctx refused\n");
++			return -EBUSY;
++		}
++		IWL_ERR(mvm, "awdl_coex: monitor chanctx accepted on %d MHz\n",
++			ctx->def.chan->center_freq);
++	}
++
+ 	/* mac parameters such as HE support can change at this stage
+ 	 * For sta, need first to configure correct state from drv_sta_state
+ 	 * and only after that update mac config.
+diff --git a/drivers/net/wireless/intel/iwlwifi/pcie/gen1_2/trans.c b/drivers/net/wireless/intel/iwlwifi/pcie/gen1_2/trans.c
+index 28b276c..6f29a33 100644
+--- a/drivers/net/wireless/intel/iwlwifi/pcie/gen1_2/trans.c
++++ b/drivers/net/wireless/intel/iwlwifi/pcie/gen1_2/trans.c
+@@ -1600,6 +1600,11 @@ iwl_pcie_set_interrupt_capa(struct pci_dev *pdev,
+ 	u16 pci_cmd;
+ 	u32 max_rx_queues = IWL_MAX_RX_HW_QUEUES;
+ 
++	/* A listener routes RX notifications to queue zero; retain real barriers. */
++	if (iwlwifi_mod_params.awdl_coex && pdev->device == 0x7e40) {
++		IWL_INFO(trans, "AWDL coexistence experiment: single RX queue\n");
++		goto enable_msi;
++	}
+ 	if (!mac_cfg->mq_rx_supported)
+ 		goto enable_msi;
+ 
