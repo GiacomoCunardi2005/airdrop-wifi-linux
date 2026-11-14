@@ -19,3 +19,10 @@ Build only the driver directory against your running kernel (clang-built kernels
 Loading is done by `scripts/awdl-coex-test`, which arms a rollback timer and attempts to restore the stock modules
 and reconnect on exit. Recovery failures are reported; the timer remains armed if cleanup fails.
 This can crash the firmware or the kernel. Save your work first.
+
+## Owly announcement patch
+
+`owly-fixed-announce.patch` is a separate **MIT-licensed** change to Owly 0.4.3,
+not kernel code. See [the experiment](../experiments/README.md) for application,
+build and test instructions. Owly copyright (c) 2026 T4T5; its MIT notice is
+preserved in [LICENSE.owly](LICENSE.owly).

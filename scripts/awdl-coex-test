@@ -6,7 +6,15 @@ set -uo pipefail
 SRC=~/awdl-diag/linux-coex/drivers/net/wireless/intel/iwlwifi
 WLAN=${WLAN:-wlan0}
 OUT=~/awdl-diag; STAMP=$(date +%Y%m%d-%H%M%S)
+OWLY=~/awdl-diag/owly/target/release/owly
+COEX_RADIO=~/awdl-diag/owly/target/release/examples/coex-radio
 exec > >(tee -a "$OUT/coex-test-$STAMP.log") 2>&1
+case ${AIRDROP:-0} in
+    0|1) ;;
+    owly) [[ -x $OWLY && -x $COEX_RADIO ]] || { echo "Compila prima la prova Owly (experiments/README.md)."; exit 1; } ;;
+    *) echo "AIRDROP deve essere 0, 1 oppure owly"; exit 1 ;;
+esac
+ip link show awdl0 &>/dev/null && { echo "awdl0 già attiva: chiudi l'altra sessione AirDrop."; exit 1; }
 
 restore() {
     local restored=1 pid
@@ -14,7 +22,11 @@ restore() {
     trap '' INT TERM HUP
     echo "== RIPRISTINO moduli originali"
     sudo pkill -x owl 2>/dev/null
-    for pid in "${CAP:-}" "${MONCAP:-}" "${PINGPID:-}"; do
+    if [[ -n ${RADIOPID:-} ]]; then
+        sudo kill "$RADIOPID" 2>/dev/null
+        wait "$RADIOPID" 2>/dev/null
+    fi
+    for pid in "${CAP:-}" "${MONCAP:-}" "${PINGPID:-}" "${NETPID:-}"; do
         [[ -n $pid ]] && kill "$pid" 2>/dev/null
     done
     sudo ip6tables -w 5 -D INPUT -i awdl0 -s fe80::/10 -p tcp --dport 8771 -m comment --comment awdl-coex -j ACCEPT 2>/dev/null
@@ -42,7 +54,7 @@ restore() {
     [[ $restored == 1 ]] || exit 1
 }
 sudo -v || exit 1
-[[ ${AIRDROP:-0} == 1 ]] && RB=480   # AIRDROP=1: prova di ricezione vera, rollback dopo 8 minuti
+[[ ${AIRDROP:-0} != 0 ]] && RB=480   # prova di ricezione vera: rollback dopo 8 minuti
 [[ $(modinfo -F vermagic "$SRC/mvm/iwlmvm.ko") == "$(modinfo -F vermagic iwlmvm)" ]] || { echo "vermagic diverso: stop"; exit 1; }
 GW=$(ip route show default dev "$WLAN" | awk '{print $3; exit}'); [[ -n $GW ]] || { echo "station non connessa: stop"; exit 1; }
 echo "Gateway $GW, canale station: $(iw dev "$WLAN" info | awk '/channel/ {print $2, $3, $4}')"
@@ -92,25 +104,45 @@ fi
 echo "-- kernel dopo il tentativo:"; sudo dmesg | grep -E "awdl_coex|iwlwifi|wlan0|awdlmon" | grep -v -E "WFPM|CNVI|RFIm|UFW" | tail -12
 echo "-- iw dev:"; iw dev | grep -E 'Interface|type|channel'
 [[ $mon_ok == 1 ]] || { echo "monitor rifiutato (vedi il passo con rc diverso da 0)"; exit 0; }
-if [[ ${AIRDROP:-0} == 1 ]]; then
-    # Prova di ricezione vera con il Wi-Fi connesso: OWL (fork) sul monitor + OpenDrop (fork), ping continuo al router.
+if [[ ${AIRDROP:-0} != 0 ]]; then
+    # Prova di ricezione: stack OWL/OpenDrop oppure Owly, con monitor e station contemporanei.
     OWL=~/.local/src/owl-jed/build/daemon/owl; OPENDROP=~/.local/src/opendrop-jed/.venv/bin/opendrop
     DEST=$(xdg-user-dir DOWNLOAD)/AirDrop; mkdir -p "$DEST"
     for pr in "tcp 8771" "udp 5353"; do set -- $pr
         sudo ip6tables -w 5 -I INPUT -i awdl0 -s fe80::/10 -p "$1" --dport "$2" -m comment --comment awdl-coex -j ACCEPT; done
-    sudo "$OWL" -i awdlmon -c 6 -S intersect -N -f -v > "$OUT/coex-owl-$STAMP.log" 2>&1 &
-    for _ in {1..20}; do ip -6 addr show dev awdl0 scope link 2>/dev/null | grep -q inet6 && ! ip -6 addr show dev awdl0 | grep -q tentative && break; sleep 1; done
-    ip link show awdl0 &>/dev/null || { echo "awdl0 non creata (vedi $OUT/coex-owl-$STAMP.log)"; exit 0; }
+    if [[ $AIRDROP == owly ]]; then
+        sudo "$COEX_RADIO" > "$OUT/coex-owly-radio-$STAMP.log" 2>&1 & RADIOPID=$!
+    else
+        sudo "$OWL" -i awdlmon -c 6 -S intersect -N -f -v > "$OUT/coex-owl-$STAMP.log" 2>&1 &
+    fi
+    ready=0
+    for _ in {1..20}; do
+        if ip -6 addr show dev awdl0 scope link 2>/dev/null | grep -q inet6 && ! ip -6 addr show dev awdl0 | grep -q tentative; then ready=1; break; fi
+        if [[ -n ${RADIOPID:-} ]] && ! kill -0 "$RADIOPID" 2>/dev/null; then break; fi
+        sleep 1
+    done
+    [[ $ready == 1 ]] || { echo "awdl0 non pronta: vedi i log radio coex in $OUT (prova $STAMP)."; exit 1; }
     ping -i 1 -c 170 -q "$GW" > "$OUT/coex-ping-$STAMP.txt" 2>&1 & PINGPID=$!
+    ping -I "$WLAN" -i 1 -c 170 -q one.one.one.one > "$OUT/coex-internet-$STAMP.txt" 2>&1 & NETPID=$!
     tshark -i awdl0 -w "$OUT/coex-awdl0-$STAMP.pcap" -q 2>/dev/null & CAP=$!
     tshark -i awdlmon -w "$OUT/coex-radio-$STAMP.pcap" -q 2>/dev/null & MONCAP=$!
     export AIRDROP_CONFIRM=~/.local/bin/airdrop-conferma OPENDROP_ANNOUNCE_INTERVAL=5
-    echo ">>> ADESSO (circa 3 minuti): iPhone con AirDrop su 'Tutti per 10 minuti' → Condividi → AirDrop → $(hostname). Internet resta attivo."
-    ( cd "$DEST" && timeout --foreground 170 "$OPENDROP" receive -i awdl0 -n "$(hostname)" -d 2>&1 | grep --line-buffered -v pkg_resources | tee "$OUT/coex-opendrop-$STAMP.log" )
-    kill "$CAP" "$MONCAP" 2>/dev/null; sudo pkill -x owl; wait "$PINGPID"
+    echo ">>> ADESSO (circa 3 minuti): iPhone con AirDrop su 'Tutti per 10 minuti' → Condividi → AirDrop → $(hostname). Misuro router e Internet durante la prova."
+    if [[ $AIRDROP == owly ]]; then
+        timeout --foreground --signal=INT 170 "$OWLY" receive --fixed-channel --dir "$DEST" 2>&1 | tee "$OUT/coex-owly-receive-$STAMP.log"
+    else
+        ( cd "$DEST" && timeout --foreground 170 "$OPENDROP" receive -i awdl0 -n "$(hostname)" -d 2>&1 | grep --line-buffered -v pkg_resources | tee "$OUT/coex-opendrop-$STAMP.log" )
+    fi
+    kill "$CAP" "$MONCAP" 2>/dev/null; sudo pkill -x owl; wait "$PINGPID"; wait "$NETPID"
     echo "== ping durante AirDrop:"; tail -2 "$OUT/coex-ping-$STAMP.txt"
-    echo "== OWL:"; grep -E 'STATS|add peer' "$OUT/coex-owl-$STAMP.log" | tail -4
-    echo "== richieste AirDrop: $(grep -c -E 'POST request at' "$OUT/coex-opendrop-$STAMP.log")"
+    echo "== ping Internet durante AirDrop:"; tail -3 "$OUT/coex-internet-$STAMP.txt"
+    if [[ $AIRDROP == owly ]]; then
+        echo "== Owly:"; tail -6 "$OUT/coex-owly-radio-$STAMP.log"
+        echo "== offerte AirDrop: $(grep -c 'wants to send:' "$OUT/coex-owly-receive-$STAMP.log")"
+    else
+        echo "== OWL:"; grep -E 'STATS|add peer' "$OUT/coex-owl-$STAMP.log" | tail -4
+        echo "== richieste AirDrop: $(grep -c -E 'POST request at' "$OUT/coex-opendrop-$STAMP.log")"
+    fi
     echo "== file in $DEST:"; ls -la --time-style=+%H:%M:%S "$DEST" | tail -4
     exit 0
 fi

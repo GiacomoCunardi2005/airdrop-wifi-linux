@@ -1,0 +1,70 @@
+diff --git a/crates/owly-cli/src/airdrop.rs b/crates/owly-cli/src/airdrop.rs
+index e36ee90..82b0bcd 100644
+--- a/crates/owly-cli/src/airdrop.rs
++++ b/crates/owly-cli/src/airdrop.rs
+@@ -67,6 +67,9 @@ pub struct ReceiveArgs {
+     /// Don't announce over mDNS, for when another responder does.
+     #[arg(long)]
+     no_mdns: bool,
++    /// Use fixed-channel announcement bursts with an externally prepared radio.
++    #[arg(long, conflicts_with = "no_mdns")]
++    fixed_channel: bool,
+     /// The TXT flags to announce (MDNS-4), decimal or 0x-prefixed hex,
+     /// to compare what Apple senders do with each (MDNS-5).
+     #[arg(long, default_value = "0x089", value_parser = parse_flags)]
+@@ -126,11 +129,15 @@ impl On {
+ /// `owly receive`.
+ pub async fn receive(bus: Option<&str>, args: ReceiveArgs) -> Result<ExitCode, String> {
+     let (iface, name) = args.on.resolve().map_err(|e| e.to_string())?;
+-    let announce = match Lease::find(bus, &iface.name).await {
+-        Ok(lease) => lease.link.announce,
+-        Err(e) => {
+-            eprintln!("not announcing as the radio asks: {e}");
+-            None
++    let announce = if args.fixed_channel {
++        Some(Announce::FIXED)
++    } else {
++        match Lease::find(bus, &iface.name).await {
++            Ok(lease) => lease.link.announce,
++            Err(e) => {
++                eprintln!("not announcing as the radio asks: {e}");
++                None
++            }
+         }
+     };
+     run_receiver(&iface, name, burst(announce), args)
+@@ -754,6 +761,34 @@ async fn run_receiver(
+ mod tests {
+     use super::*;
+ 
++    #[test]
++    fn fixed_channel_announcements_are_opt_in_and_require_mdns() {
++        use clap::Parser;
++        let crate::Command::Receive(default) = crate::Cli::try_parse_from(["owly", "receive"])
++            .unwrap()
++            .command
++        else {
++            panic!("receive command")
++        };
++        assert!(!default.fixed_channel);
++        let crate::Command::Receive(fixed) =
++            crate::Cli::try_parse_from(["owly", "receive", "--fixed-channel"])
++                .unwrap()
++                .command
++        else {
++            panic!("receive command")
++        };
++        assert!(fixed.fixed_channel);
++        assert!(!fixed.accept);
++        assert!(
++            crate::Cli::try_parse_from(["owly", "receive", "--fixed-channel", "--no-mdns"])
++                .is_err()
++        );
++        let burst = burst(Some(Announce::FIXED)).unwrap();
++        assert_eq!(burst.count, 64);
++        assert_eq!(burst.interval, Duration::from_micros(16_400));
++    }
++
+     #[test]
+     fn straight_and_curly_apostrophes_name_the_same_receiver() {
+         assert!(same_name("Jane's iPhone", "Jane's iPhone"));

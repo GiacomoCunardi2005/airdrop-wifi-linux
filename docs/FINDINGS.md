@@ -65,6 +65,40 @@ router on 5 GHz channel 100 (DFS, 80 MHz). Phone: iPhone 16 Pro, iOS 27. All fro
   Neither raw captures nor identifying logs are committed. Missing ACKs remain a hypothesis for this attempt;
   the available capture alone cannot establish the cause of failed discovery.
 
+## 9. Repeatable exclusive reception; prepare an Owly coexistence comparison
+- A second photo was received with `airdrop-owly` on 2026-11-14 at about 21:50 CET: **1,492,343 bytes**,
+  matching the offered size. It decodes completely as a 3840×2160 JPEG. This is a second exclusive-mode
+  success, not evidence of simultaneous Internet access.
+- The successful Owly sessions announce in bursts of 64 packets; the earlier coexistence test used OpenDrop
+  announcements every five seconds. Both the AWDL engine and AirDrop implementation also differ.
+- Prepared `AIRDROP=owly awdl-coex-test` to reuse Owly's native AWDL engine and its receiver on the existing
+  coexistence monitor. The fixed-channel mDNS policy is selected explicitly. See `experiments/README.md`.
+  No changes to the working installed Owly service or the driver patch are required for this comparison.
+- The receive test now measures an external Internet host as well as the gateway. Radio captures remain local.
+- Driver review: `nic_not_ack_enabled` in the MLD MAC configuration concerns reception of **ACK-enabled
+  aggregates**, per `fw/api/mac-cfg.h`; it is not an ordinary unicast ACK on/off switch. Do not flip it on
+  the assumption that it enables monitor ACKs.
+- Station + IBSS is absent from this driver's advertised combinations. An [earlier AX211 report](https://github.com/t4t5/owly/issues/4)
+  describes a firmware fatal error when forcing that combination on another device/firmware. It does not
+  prove impossibility here, but supports measuring the existing listener before changing interface limits.
+- The new Owly coexistence path has not yet been tested on the radio. It still uses a monitor without an
+  ACKing cell, so it may improve discovery without producing reliable transfers.
+
+## 10. GNOME tray using the existing Omdrop UI backend
+- The Omarchy panel depends on Quickshell components. The installed Fdrop already provides a GTK
+  interface and an asynchronous Omdrop CLI runner/status model, reused by `desktop/tray.py`.
+- The indicator exposes receive windows, continuous reception, stop, the full interface and downloads.
+  Starting it only queries status. Owly's probe gates each tray receive action; modes that take the
+  station offline require explicit confirmation. A failed/unknown probe prevents startup.
+- The current Omdrop status reports a running receiver with `visible=false` and `reason=radio-lost`.
+  The indicator reports that unavailable radio, rather than claiming AirDrop is working.
+- Validated 11 Python tests without radio access, the Owly announcement-policy test, and compilation
+  of the coexistence adapter. The installed indicator is registered with GNOME's StatusNotifier watcher;
+  its exported menu and state are readable over D-Bus. The tray service has no restarts in this check.
+- After installation the station remains connected, Owly's radio state is `idle`, and an external
+  HTTPS request succeeds. This checks that installing the UI did not take the radio; it is not a
+  concurrent AirDrop/Internet test. The Omdrop receive path still needs a real phone transfer test.
+
 ## Open
 - Receive a file while connected. First investigate discovery with the paired radio and `awdl0` captures
   from `AIRDROP=1 awdl-coex-test`; distinguish local announcements from radio transmission and peer responses.
