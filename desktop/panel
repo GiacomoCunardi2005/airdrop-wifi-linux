@@ -1,0 +1,21 @@
+#!/bin/bash
+set -euo pipefail
+HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+RUNTIME="$HOME/.local/lib/owly-ui-runtime/usr"
+if command -v quickshell >/dev/null; then
+    QS=$(command -v quickshell)
+elif [[ -x $RUNTIME/bin/quickshell ]]; then
+    QS="$RUNTIME/bin/quickshell"
+    export LD_LIBRARY_PATH="$RUNTIME/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+else
+    echo 'Installare Quickshell per aprire il pannello originale di Omdrop.' >&2
+    exit 1
+fi
+export QT_QPA_PLATFORM=xcb
+export OMDROP_CLI_REAL=${OMDROP_CLI_REAL:-$(command -v omdrop)}
+export OMDROP_CLI="$HERE/omdrop.py"
+export OMDROP_SOUNDS=${OMDROP_SOUNDS:-$(dirname -- "$(dirname -- "$(readlink -f -- "$OMDROP_CLI_REAL")")")/share/sounds}
+if [[ ${1:-} == --show ]]; then
+    exec "$QS" ipc -p "$HERE/qml" call netmojo.omdrop showPanel
+fi
+exec "$QS" -p "$HERE/qml"

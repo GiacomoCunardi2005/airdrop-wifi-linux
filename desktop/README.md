@@ -1,54 +1,104 @@
-# GNOME tray for Owly / Omdrop
+# The Owly demo panel on GNOME
 
-The Omarchy panel uses Quickshell-specific QML components. This small GTK3
-indicator reuses the same `omdrop` commands, plus the installed Fdrop CLI runner
-and status model. It does not implement AirDrop or replace the receiver.
+This hosts the **original Omdrop QML panel shown in Owly's README video**.
+The duration slider, Everyone / Contacts Only tabs, known senders, peer radar,
+file sending, computer name and destination controls are upstream's code.
+The GNOME indicator opens that panel. Its middle-click shortcut opens it directly;
+with a normal click, select **Apri AirDrop…**.
 
-Requirements: Owly, configured Omdrop and Fdrop, Python GObject bindings, GTK3,
-AyatanaAppIndicator3, GNU timeout, and GNOME's
+![Original Omdrop panel running on GNOME](panel.png)
+
+The panel calls the installed Omdrop backend. The three Omarchy host components
+(`Panel`, `KeyboardPanel`, `BarIconButton`) are replaced with a small standalone
+host. GNOME doesn't implement layer-shell, so the popup uses XWayland. It opens
+at the top right of the primary screen and closes on Escape or lost focus.
+Other monitors and mixed display scales haven't been tested.
+
+## Requirements and installation
+
+Requires configured Owly / Omdrop, Quickshell 0.3.2, XWayland, QtQuick Controls,
+Python GObject bindings, GTK3, AyatanaAppIndicator3, Zenity, and GNOME's
 [AppIndicator extension](https://github.com/ubuntu/gnome-shell-extension-appindicator).
-Fdrop's Python modules must be installed in `~/.local/share/fdrop/src`,
-`/usr/share/fdrop`, or on Python's module path. This is tested with Fdrop 0.2.0,
-Owly 0.4.3 and the Omdrop Python fallback on the lab machine.
+A Nerd Font supplies the original panel's glyphs (the adapter uses MesloLGS).
+No Fdrop package or Python module is used.
 
-From the repository root, install as your desktop user (no sudo):
+On this CachyOS machine the Quickshell runtime was extracted from distro
+packages into `~/.local/lib/owly-ui-runtime/usr`; the launcher prefers a system
+Quickshell when installed. Runtime binaries aren't committed here.
+
+Back up an existing `~/.local/share/omdrop-tray` installation first. From the
+repository root, as your desktop user:
 
 ```bash
 install -Dm644 desktop/tray.py ~/.local/share/omdrop-tray/tray.py
+install -m755 desktop/panel desktop/omdrop.py ~/.local/share/omdrop-tray/
+install -m644 desktop/omdrop-symbolic.svg ~/.local/share/omdrop-tray/
+cp -a desktop/qml ~/.local/share/omdrop-tray/
 install -Dm644 desktop/omdrop-tray.service ~/.config/systemd/user/omdrop-tray.service
 systemctl --user daemon-reload
-systemctl --user enable --now omdrop-tray.service
+systemctl --user enable omdrop-tray.service
 systemctl --user restart omdrop-tray.service
 ```
 
-If replacing an existing `omdrop-tray` installation, back up those two files first.
-Uninstall the indicator with `systemctl --user disable --now omdrop-tray.service`.
-That stops only the indicator; use **Ferma AirDrop** to end a receive session.
+Opening the UI only reads status. Before a panel command can start the radio,
+`omdrop.py` checks `owly doctor --json`; exclusive / active-monitor modes need
+explicit confirmation that Wi-Fi disconnects. Failed probes block startup.
+Stopping and rescheduling a live session keep the backend's normal behavior.
+Continuous reception is Omdrop's **Until I turn it off** mode, not boot recovery.
+On the lab AX211, simultaneous AirDrop and Wi-Fi remains unproven.
 
-The menu provides status, five-minute or continuous reception, stop, the full
-Fdrop interface for sending/settings, and the configured download directory.
-Opening the indicator or logging in only reads status; it never starts the radio.
-Continuous reception lasts until Omdrop stops it; it is not automatically resumed
-after a reboot or radio failure. Receive visibility and transfer acceptance remain
-Omdrop's existing policy. The stop action preserves Omdrop's in-flight send check.
+Disable the indicator with `systemctl --user disable --now omdrop-tray.service`.
+This closes the UI only; turn reception off in the panel to release the radio.
 
-Before starting, the indicator reads `owly doctor --json`. A missing/failed report
-blocks startup. Exclusive and active-monitor modes require an explicit confirmation
-that Wi-Fi will disconnect; Cancel is the default. On this AX211 that warning applies.
-The Fdrop window retains its own controls; this check covers the tray's start actions.
+## Discovery comparison
 
-**An always-visible tray is not always-on AirDrop with Internet.** The latter remains
-unproven on this card. A running receiver without a visible radio is shown as unavailable,
-not as successful reception. Existing successful transfers used `owly receive` directly;
-the Omdrop receive path launched by this tray still needs an end-to-end phone test.
+The installed Omdrop Python path announces periodically through `omdrop-owl`'s
+root supervisor, but it doesn't run a query responder. Owly's native receive
+path also answers mDNS questions. In the 22:27 lab attempt the radio heard the
+phone, but the receiver logged no requests. This difference is a **hypothesis**
+for failed discovery, not a proven diagnosis.
 
-Validation in a graphical session (backend calls mocked, radio untouched):
+`experiments/owly-mdns.rs` reuses Owly's mDNS implementation with the existing
+lease, address, service ID, port, and hostname. It never acquires the radio or
+changes the receiver's acceptance policy. The user service starts with the
+receiver and stops when that receiver stops. For a controlled comparison:
+
+```bash
+install -m644 experiments/owly-mdns.rs \
+  ~/awdl-diag/owly/crates/owly-cli/examples/owly-mdns.rs
+cargo build --manifest-path ~/awdl-diag/owly/Cargo.toml --locked --release \
+  -p owly-cli --example owly-mdns
+install -m755 ~/awdl-diag/owly/target/release/examples/owly-mdns \
+  ~/.local/share/omdrop-tray/owly-mdns
+install -m755 desktop/mdns ~/.local/share/omdrop-tray/
+install -Dm644 desktop/airdrop-mdns.service ~/.config/systemd/user/airdrop-mdns.service
+systemctl --user daemon-reload
+systemctl --user enable airdrop-mdns.service
+```
+
+Then start reception from the panel and check `journalctl --user -u airdrop-mdns`.
+The extra responder is installed/enabled in the lab, but a new file transfer
+through this path has not been verified. Disable it with
+`systemctl --user disable --now airdrop-mdns.service` to restore the comparison.
+
+## Source and verification
+
+- Omdrop: [ee475b2](https://github.com/netmojo-systems/omdrop-plugin/tree/ee475b2977c88fa9d2d6ef29068a3c5e4800b0ee).
+  `Panel.qml`, `Radar.qml`, `OmdropIcon.qml` are reused. The panel's only changes
+  select the CLI/sound paths, expose a UI-opening IPC method, and avoid calling
+  a lost radio "waking" for 200 seconds.
+- Omarchy UI: [9ac0883](https://github.com/omacom/omarchy/tree/9ac08836cf786c242e514cee8dfac8808e7ee641/shell).
+  Controls, border helpers and style tokens are reused. Hyprland and Omarchy
+  config watchers are omitted; the host supplies fixed colors and font.
+- Both upstream MIT notices are in `licenses/`.
+
+Validation: 12 Python tests, 10 Owly mDNS protocol tests, native responder
+compilation, live QML rendering, opening the installed panel from the indicator,
+and continued HTTPS connectivity with the radio idle. No phone transfer or
+concurrent AirDrop/Internet claim follows from those UI checks.
 
 ```bash
 /usr/bin/python3 -B -m unittest discover -s tests -v
+cargo test --manifest-path ~/awdl-diag/owly/Cargo.toml --locked \
+  -p owly-airdrop --lib proto::mdns
 ```
-
-The tray tests skip when GTK, Ayatana, Fdrop or a display is missing. Headless GTK
-tests can use `xvfb-run`. See [Fdrop](https://github.com/konstiu/fdrop),
-[Omdrop](https://github.com/netmojo-systems/omdrop-plugin) and
-[Owly](https://github.com/t4t5/owly) for the reused components.

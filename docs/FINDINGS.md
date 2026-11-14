@@ -84,20 +84,24 @@ router on 5 GHz channel 100 (DFS, 80 MHz). Phone: iPhone 16 Pro, iOS 27. All fro
 - The new Owly coexistence path has not yet been tested on the radio. It still uses a monitor without an
   ACKing cell, so it may improve discovery without producing reliable transfers.
 
-## 10. GNOME tray using the existing Omdrop UI backend
-- The Omarchy panel depends on Quickshell components. The installed Fdrop already provides a GTK
-  interface and an asynchronous Omdrop CLI runner/status model, reused by `desktop/tray.py`.
-- The indicator exposes receive windows, continuous reception, stop, the full interface and downloads.
-  Starting it only queries status. Owly's probe gates each tray receive action; modes that take the
-  station offline require explicit confirmation. A failed/unknown probe prevents startup.
-- The current Omdrop status reports a running receiver with `visible=false` and `reason=radio-lost`.
-  The indicator reports that unavailable radio, rather than claiming AirDrop is working.
-- Validated 11 Python tests without radio access, the Owly announcement-policy test, and compilation
-  of the coexistence adapter. The installed indicator is registered with GNOME's StatusNotifier watcher;
-  its exported menu and state are readable over D-Bus. The tray service has no restarts in this check.
-- After installation the station remains connected, Owly's radio state is `idle`, and an external
-  HTTPS request succeeds. This checks that installing the UI did not take the radio; it is not a
-  concurrent AirDrop/Internet test. The Omdrop receive path still needs a real phone transfer test.
+## 10. Original Owly demo panel hosted on GNOME
+- Inspected Owly's README video. It shows Omdrop's Omarchy panel. `desktop/qml` now reuses that
+  original panel, radar, icon and Omarchy controls, with a standalone GNOME/XWayland popup host.
+  The earlier Fdrop-based launcher was replaced. See `desktop/README.md` for pinned sources/licenses.
+- Duration, audience, known senders, peer radar, sending, name and destination remain the original UI.
+  Its CLI bridge probes Owly before starting reception/sending, with explicit confirmation for modes
+  that disconnect Wi-Fi. A lost radio no longer spends 200 seconds described as "waking".
+- The 22:27–22:29 Omdrop attempt brought up Owly's exclusive radio and heard the phone. Its Python
+  receiver logged no requests. Periodic announcements succeeded locally; that doesn't establish
+  delivery to the phone. The session ended by explicit lease release, not a firmware crash.
+- Unlike `owly receive`, that fallback stack doesn't run an mDNS question responder. Added a controlled
+  comparison using Owly's existing responder beside the same receiver (`experiments/owly-mdns.rs`).
+  It uses the existing lease and Omdrop hostname; no radio acquisition. This is a discovery hypothesis,
+  not a proven fix. The service is installed and enabled with the receiver; no new transfer is verified.
+- Validated 12 Python tests, 10 native mDNS protocol tests and responder compilation. The original panel
+  renders and opens on GNOME; its screenshot is in `desktop/panel.png`. The receiver remains off,
+  Owly's state is idle, Wi-Fi stays connected and an external HTTPS request succeeds after UI installation.
+  These are UI/installation checks, not simultaneous AirDrop/Internet or phone-transfer evidence.
 
 ## Open
 - Receive a file while connected. First investigate discovery with the paired radio and `awdl0` captures

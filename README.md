@@ -15,7 +15,7 @@ firmware 89), CachyOS, kernel 7.3.4, iPhone 16 Pro on iOS 27.
 | Radio hears AWDL **while the station stays connected** to the router | **Works** with the experimental driver patch: 40/40 pings to the gateway, 46 AWDL frames in 20 s |
 | Receive a file **while Wi-Fi stays connected** | **Failed first attempt:** PC absent from the phone's list, zero AirDrop requests; gateway ping 114/114 |
 | Send PC → iPhone, large files, long-term stability | Not tested |
-| GNOME tray with status and Omdrop controls | Available in [desktop/](desktop/README.md); continuous reception still requires a working radio |
+| Original Owly demo panel on GNOME | Available in [desktop/](desktop/README.md); simultaneous Wi-Fi remains unproven |
 
 ## Why this is hard
 
@@ -39,8 +39,8 @@ See [docs/FINDINGS.md](docs/FINDINGS.md) for what was measured, in order, includ
 - `scripts/airdrop-ricevi`, `scripts/airdrop-conferma`, `scripts/awdl-diag` — the earlier OWL + OpenDrop path and
   diagnostics (monitor-only, no ACKs: the phone contacts the PC but never lists it on this card).
 - `patches/` — the experimental `iwlwifi` patch (GPL-2.0), see `patches/README.md`.
-- `desktop/` — GNOME AppIndicator using the existing Omdrop backend and Fdrop components;
-  status, receive/stop controls and an explicit Wi-Fi disconnect warning for exclusive mode.
+- `desktop/` — the original Omdrop panel shown in Owly's demo, hosted on GNOME;
+  receive/stop controls, duration, contacts, peer radar, sending and settings.
 
 Script messages are in Italian.
 

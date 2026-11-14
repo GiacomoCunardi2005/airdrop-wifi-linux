@@ -1,0 +1,11 @@
+#!/usr/bin/python3
+"""Use Omdrop's own hostname with Owly's mDNS responder; no radio acquisition."""
+import os
+from pathlib import Path
+import sys
+
+sys.path.insert(0, "/usr/lib/omdrop")
+from awdl_identity import awdl_host
+
+binary = Path(__file__).resolve().parent / "owly-mdns"
+os.execv(binary, [str(binary), awdl_host()])
