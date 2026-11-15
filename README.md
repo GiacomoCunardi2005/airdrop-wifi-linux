@@ -13,7 +13,7 @@ firmware 89), CachyOS, kernel 7.3.4, iPhone 16 Pro on iOS 27.
 |---|---|
 | Receive a photo from an iPhone (iOS 27), Wi-Fi **disconnected** during the session | **Works** with [Owly](https://github.com/t4t5/owly) in exclusive mode (`scripts/airdrop-owly`) |
 | Radio hears AWDL **while the station stays connected** to the router | **Works** with the experimental driver patch: 40/40 pings to the gateway, 46 AWDL frames in 20 s |
-| Receive a file **while Wi-Fi stays connected** | **Works (first run)** with the patched driver and `AIRDROP=owly scripts/awdl-coex-test`: 2 photos received, station stayed associated, 4% ping loss, high latency; setup still drops Wi-Fi for a few seconds |
+| Receive a file **while Wi-Fi stays connected** | **Works, always on**: patched driver via DKMS plus `desktop/install-coex`. AirDrop is on from boot until turned off in the tray, consent as a GNOME notification; received across a reboot with no Wi-Fi disconnect. Gateway latency rises while the AWDL engine shares the radio |
 | Send PC → iPhone, large files, long-term stability | Not tested |
 | Original Owly demo panel on GNOME | Available in [desktop/](desktop/README.md); simultaneous Wi-Fi remains unproven |
 
