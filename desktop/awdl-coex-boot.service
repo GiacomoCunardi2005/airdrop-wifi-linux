@@ -1,0 +1,15 @@
+[Unit]
+Description=AWDL monitor for Wi-Fi + AirDrop, prepared before the Wi-Fi connects
+# cfg80211 sets a monitor's channel only while no other interface runs: do it before
+# NetworkManager brings wlan0 up, so receiving never takes the station down.
+Before=NetworkManager.service
+After=systemd-modules-load.service systemd-udev-settle.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/lib/awdl-coex/coex-session prepare
+TimeoutStartSec=20
+
+[Install]
+WantedBy=multi-user.target

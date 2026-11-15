@@ -93,6 +93,8 @@ Panel {
   property string deviceName: ""
   property string downloadDir: ""
   property string blockedReason: ""
+  // Coexistence driver loaded: receiving keeps the Wi-Fi connection up.
+  property bool coex: false
   // Who may send: "everyone" or "contacts" (the saved `omdrop visibility`),
   // and how many people the Contacts Only allow-list holds.
   property string audience: "everyone"
@@ -111,6 +113,8 @@ Panel {
   // What the radio side says is wrong, in words rather than a token.
   readonly property string reasonText: {
     switch (blockedReason) {
+    case "no_coex_driver":      return "Il driver Wi-Fi + AirDrop non è caricato."
+    case "coex_helper_missing": return "Manca coex-session: installa desktop/install-coex."
     case "no_awdl0":   return "The AWDL interface is missing. The Wi-Fi driver needs loading."
     // The retry advice this used to carry was disproved by five identical
     // failures: parked-with-a-template-loaded cannot be cleared from userspace,
@@ -120,6 +124,7 @@ Panel {
     case "ok":
     case "expired":
     case "stopped":
+    case "waking":
     case "":           return ""
     // Anything unrecognised is worth showing rather than swallowing, but only
     // when something is actually wrong: while we are visible there is no
@@ -283,10 +288,11 @@ Panel {
     if (settling) return "The radio takes a few seconds to come up."
     if (lastError !== "") return lastError
     if (reasonText !== "") return reasonText
-    if (!receiving) return "Nearby Apple devices cannot see this computer."
+    if (!receiving) return coex ? "Wi-Fi + AirDrop insieme: il Wi-Fi resta connesso mentre ricevi."
+                                : "Nearby Apple devices cannot see this computer."
     if (visibility === 0) return "The receiver is up, but nothing is advertising on the radio."
     if (visibility === -1) return "Cannot tell whether anyone can see us."
-    return visibleText
+    return coex ? visibleText + " Il Wi-Fi resta connesso." : visibleText
   }
 
   // The row that set the window becomes the row that reports it: while a timed
@@ -957,6 +963,7 @@ Panel {
       deviceName = s.name || ""
       downloadDir = s.dir || ""
       blockedReason = s.reason || ""
+      coex = !!s.coex
       syncWindowToRunning(s.mode || "off")
       if (!soundProc.running) soundOn = s.sound !== false
       if (!audienceProc.running) audience = s.visibility === "contacts" ? "contacts" : "everyone"

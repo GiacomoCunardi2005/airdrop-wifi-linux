@@ -38,7 +38,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ = interrupt.recv() => {},
         _ = terminate.recv() => {},
         _ = hangup.recv() => {},
-        _ = tokio::time::sleep(Duration::from_secs(210)) => {},
+        // OWLY_COEX_SECS bounds a lab run; the always-on service leaves it unset and runs until stopped.
+        _ = async {
+            match std::env::var("OWLY_COEX_SECS").ok().and_then(|s| s.parse().ok()) {
+                Some(secs) => tokio::time::sleep(Duration::from_secs(secs)).await,
+                None => std::future::pending().await,
+            }
+        } => {},
         _ = failed.wait_for(|reason| reason.is_some()) => {},
     }
     let failure = failed.borrow().clone();

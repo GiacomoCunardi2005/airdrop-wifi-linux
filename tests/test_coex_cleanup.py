@@ -9,12 +9,12 @@ SCRIPT = (Path(__file__).resolve().parents[1] / "scripts/awdl-coex-test").read_t
 RESTORE = SCRIPT[SCRIPT.index("restore() {"):SCRIPT.index("sudo -v || exit 1")]
 MOCKS = r'''
 set -uo pipefail
-WLAN=testwifi OUT=/unused STAMP=test
+WLAN=testwifi CONNECTION=testuuid OUT=/unused STAMP=test
 sudo() {
     printf '%s\n' "$*" >> "$CALLS"
     case "$*" in
         'rmmod iwlmvm iwlwifi') return "${MODULE_FAIL:-0}" ;;
-        'nmcli --wait 30 device connect testwifi') return "${CONNECT_FAIL:-0}" ;;
+        'nmcli --wait 30 connection up uuid testuuid ifname testwifi') return "${CONNECT_FAIL:-0}" ;;
     esac
     return 0
 }
@@ -46,7 +46,7 @@ class CleanupTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(any(line.startswith("kill ") for line in calls))
         self.assertEqual(calls.count("ip link show testwifi"), 3)
-        self.assertLess(calls.index("sleep"), calls.index("nmcli --wait 30 device connect testwifi"))
+        self.assertLess(calls.index("sleep"), calls.index("nmcli --wait 30 connection up uuid testuuid ifname testwifi"))
         self.assertIn("nmcli device set testwifi managed yes", calls)
         self.assertIn("systemctl stop awdl-coex-rollback.timer", calls)
 
@@ -79,6 +79,7 @@ ip() {
     echo 'default via gateway dev testwifi'
 }
 iw() { :; }
+nmcli() { echo testuuid; }
 '''
             calls = Path(directory) / "calls"
             result = subprocess.run(
@@ -89,6 +90,41 @@ iw() { :; }
             self.assertEqual(result.returncode, 1, result.stderr)
             self.assertIn("Timer di emergenza non attivato", result.stdout)
             self.assertEqual(len(calls.read_text().splitlines()), 2)
+
+    def test_autoloaded_module_is_removed_before_insertion_despite_pipefail(self):
+        loader = SCRIPT[SCRIPT.index('for _ in {1..15}; do'):SCRIPT.index('for _ in {1..40}; do')]
+        with tempfile.TemporaryDirectory() as directory:
+            module = Path(directory) / "iwlmvm"
+            module.mkdir()
+            calls = Path(directory) / "calls"
+            mocks = r'''
+set -uo pipefail
+SRC=/unused
+sleep() { :; }
+# Model the old lsmod pipeline: grep finds the module but the producer gets SIGPIPE.
+lsmod() { echo 'iwlmvm 1 0'; return 141; }
+sudo() {
+    printf '%s\n' "$*" >> "$CALLS"
+    case $1 in
+        rmmod) rmdir "$MODULE_PATH" ;;
+        insmod) [[ ! -d $MODULE_PATH ]] ;;
+    esac
+}
+'''
+            result = subprocess.run(
+                ["bash", "-c", mocks + loader.replace("/sys/module/iwlmvm", str(module)).replace("/sys/module/iwlwifi", directory)],
+                env={"PATH": "/usr/bin:/bin", "CALLS": str(calls), "MODULE_PATH": str(module)},
+                text=True, capture_output=True, timeout=5,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(calls.read_text().splitlines(),
+                             ["rmmod iwlmvm", "insmod /unused/mvm/iwlmvm.ko"])
+
+    def test_awdl_mac_is_local_and_differs_from_station(self):
+        line = next(l for l in SCRIPT.splitlines() if l.startswith("AWDL_MAC="))
+        result = subprocess.run(["bash", "-c", 'STA_MAC=00:11:22:33:44:55\n' + line + '\necho "$AWDL_MAC"'],
+                                text=True, capture_output=True, timeout=5)
+        self.assertEqual(result.stdout.strip(), "02:11:22:33:44:0f", result.stderr)
 
     def test_owly_receive_path_keeps_confirmation_and_measures_internet(self):
         receive = SCRIPT[SCRIPT.index('if [[ ${AIRDROP:-0} != 0 ]]; then'):]
@@ -115,7 +151,7 @@ xdg-user-dir() { echo "$HOME"; }
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             recorded = calls.read_text()
-            self.assertIn("sudo /test/coex-radio", recorded)
+            self.assertIn("sudo OWLY_COEX_SECS=210 /test/coex-radio", recorded)
             self.assertIn("/test/owly receive --fixed-channel --dir", recorded)
             self.assertNotIn("--accept", recorded)
             self.assertNotIn("opendrop", recorded)

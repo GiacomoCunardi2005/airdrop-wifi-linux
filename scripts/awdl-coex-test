@@ -36,7 +36,7 @@ restore() {
         for _ in {1..30}; do ip link show "$WLAN" &>/dev/null && break; sleep 1; done
         if ! { sudo nmcli radio wifi on &&
                sudo nmcli device set "$WLAN" managed yes &&
-               sudo nmcli --wait 30 device connect "$WLAN"; }; then
+               sudo nmcli --wait 30 connection up uuid "$CONNECTION" ifname "$WLAN"; }; then
             restored=0
         fi
     else
@@ -57,6 +57,8 @@ sudo -v || exit 1
 [[ ${AIRDROP:-0} != 0 ]] && RB=480   # prova di ricezione vera: rollback dopo 8 minuti
 [[ $(modinfo -F vermagic "$SRC/mvm/iwlmvm.ko") == "$(modinfo -F vermagic iwlmvm)" ]] || { echo "vermagic diverso: stop"; exit 1; }
 GW=$(ip route show default dev "$WLAN" | awk '{print $3; exit}'); [[ -n $GW ]] || { echo "station non connessa: stop"; exit 1; }
+CONNECTION=$(nmcli -g GENERAL.CON-UUID device show "$WLAN") || exit 1
+[[ -n $CONNECTION && $CONNECTION != -- ]] || { echo "Profilo Wi-Fi attivo non trovato: stop"; exit 1; }
 echo "Gateway $GW, canale station: $(iw dev "$WLAN" info | awk '/channel/ {print $2, $3, $4}')"
 # rete di sicurezza: tra 4 minuti rimette comunque i moduli originali, anche se lo script si blocca
 sudo systemd-run --unit=awdl-coex-rollback --on-active=${RB:-240} /bin/bash -c \
@@ -74,12 +76,20 @@ sudo rmmod iwlmvm iwlwifi || { echo "rmmod fallito"; exit 1; }
 sudo insmod "$SRC/iwlwifi.ko" awdl_coex=1 || { echo "insmod iwlwifi fallito"; exit 1; }
 [[ $(cat /sys/module/iwlwifi/parameters/awdl_coex 2>/dev/null) == Y ]] || { echo "awdl_coex non attivo: stop"; exit 1; }
 # iwlwifi carica da solo iwlmvm ORIGINALE (op mode): attendi che parta, scaricalo e metti il nostro
-for _ in {1..15}; do lsmod | grep -q '^iwlmvm' && break; sleep 1; done
+for _ in {1..15}; do [[ -d /sys/module/iwlmvm ]] && break; sleep 1; done
 sleep 3
-lsmod | grep -q '^iwlmvm' && { echo "scarico iwlmvm originale caricato in automatico"; sudo rmmod iwlmvm || { echo "rmmod iwlmvm fallito"; exit 1; }; }
+if [[ -d /sys/module/iwlmvm ]]; then
+    echo "scarico iwlmvm originale caricato in automatico"
+    # rmmod, non modprobe --remove: quello scarica anche il nostro iwlwifi rimasto senza utenti
+    # e poi iwlmvm.ko non trova i simboli (Unknown symbol, prova delle 00:28 del 15/11).
+    for _ in {1..10}; do sudo rmmod iwlmvm 2>/dev/null && break; sleep 0.5; done
+    [[ -d /sys/module/iwlmvm ]] && { echo "rimozione iwlmvm fallita"; exit 1; }
+fi
+[[ -d /sys/module/iwlwifi ]] || { echo "iwlwifi modificato non più caricato: stop"; exit 1; }
 sudo insmod "$SRC/mvm/iwlmvm.ko" || { echo "insmod iwlmvm fallito"; exit 1; }
 for _ in {1..40}; do ip link show "$WLAN" &>/dev/null && break; sleep 1; done
-sudo nmcli radio wifi on; sleep 2; sudo nmcli device connect "$WLAN" >/dev/null 2>&1
+sudo nmcli radio wifi on; sleep 2
+sudo nmcli --wait 30 connection up uuid "$CONNECTION" ifname "$WLAN" || exit 1
 for _ in {1..30}; do ip route show default dev "$WLAN" | grep -q . && break; sleep 1; done
 sudo dmesg | grep -E 'AWDL coexistence|iwlwifi.*(error|FW|Microcode)' | tail -5
 echo "== station con modulo modificato: ping $GW"; ping -c 8 -i 0.5 -q "$GW" | tail -2 || { echo "station KO: stop"; exit 1; }
@@ -87,7 +97,13 @@ echo "== station con modulo modificato: ping $GW"; ping -c 8 -i 0.5 -q "$GW" | t
 echo "== monitor passivo sul canale 6 (station resta sul suo canale)"
 step() { echo "-- $1"; shift; "$@"; local rc=$?; echo "   rc=$rc"; return $rc; }
 mon_ok=0
+# Indirizzo AWDL proprio (locale, derivato dalla station): il firmware manda ACK solo per l'indirizzo
+# del contesto LISTENER, e con lo stesso MAC della station l'iPhone non riceve ACK e non elenca il PC.
+STA_MAC=$(cat "/sys/class/net/$WLAN/address")
+AWDL_MAC=$(awk -F: '{printf "%02x:%s:%s:%s:%s:%02x", or(strtonum("0x"$1),2), $2,$3,$4,$5, xor(strtonum("0x"$6),0x5a)}' <<<"$STA_MAC")
+echo "-- MAC station $STA_MAC, MAC AWDL $AWDL_MAC"
 if step "1) interface add" sudo iw dev "$WLAN" interface add awdlmon type monitor &&
+   step "1b) MAC AWDL"     sudo ip link set awdlmon address "$AWDL_MAC" &&
    step "2) ip link up"    sudo ip link set awdlmon up &&
    step "3) canale 6"      sudo iw dev awdlmon set channel 6; then mon_ok=1; fi
 if [[ $mon_ok == 0 ]] && ip link show awdlmon &>/dev/null; then
@@ -96,7 +112,7 @@ if [[ $mon_ok == 0 ]] && ip link show awdlmon &>/dev/null; then
     iw dev | grep -E 'Interface|type'
     if step "3b) canale 6 con station giù" sudo iw dev awdlmon set channel 6; then mon_ok=1; fi
     sudo ip link set "$WLAN" up; sudo nmcli device set "$WLAN" managed yes; sleep 2
-    sudo nmcli device connect "$WLAN" >/dev/null 2>&1
+    sudo nmcli --wait 30 connection up uuid "$CONNECTION" ifname "$WLAN" || exit 1
     for _ in {1..30}; do ip route show default dev "$WLAN" | grep -q . && break; sleep 1; done
     echo "-- station dopo 3b: $(nmcli -t -f DEVICE,STATE device | grep "^$WLAN")"
     ping -c 6 -i 0.5 -q "$GW" | tail -2
@@ -111,7 +127,7 @@ if [[ ${AIRDROP:-0} != 0 ]]; then
     for pr in "tcp 8771" "udp 5353"; do set -- $pr
         sudo ip6tables -w 5 -I INPUT -i awdl0 -s fe80::/10 -p "$1" --dport "$2" -m comment --comment awdl-coex -j ACCEPT; done
     if [[ $AIRDROP == owly ]]; then
-        sudo "$COEX_RADIO" > "$OUT/coex-owly-radio-$STAMP.log" 2>&1 & RADIOPID=$!
+        sudo OWLY_COEX_SECS=210 "$COEX_RADIO" > "$OUT/coex-owly-radio-$STAMP.log" 2>&1 & RADIOPID=$!
     else
         sudo "$OWL" -i awdlmon -c 6 -S intersect -N -f -v > "$OUT/coex-owl-$STAMP.log" 2>&1 &
     fi

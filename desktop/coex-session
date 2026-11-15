@@ -1,0 +1,112 @@
+#!/bin/bash
+# Root side of "Wi-Fi + AirDrop insieme": an AWDL monitor next to the connected station.
+# Needs iwlwifi/iwlmvm built from patches/iwlwifi-awdl-coex-7.3.patch, loaded with awdl_coex=1.
+# Installed root-owned in /usr/local/lib/awdl-coex/ and run through pkexec by desktop/omdrop.py.
+#   start   start awdl-coex-radio.service (Owly's AWDL engine, awdl0); 5 = already running
+#   setup / teardown   the service's ExecStartPre / ExecStopPost: monitor, channel 6, firewall
+#   prepare at boot, before NetworkManager: awdlmon up on channel 6 while the station is still down,
+#           so no later start has to take the station down (awdl-coex-boot.service)
+#   stop    stop the engine; awdlmon stays up on channel 6 for the next start
+#   status  {"visible": bool, "reason": str}, as omdrop's radio helper reports it
+set -uo pipefail
+WLAN=${WLAN:-wlan0}
+MON=awdlmon
+RADIO=$(dirname -- "$(readlink -f -- "$0")")/coex-radio
+UNIT=awdl-coex-radio
+
+coex() { [[ $(cat /sys/module/iwlwifi/parameters/awdl_coex 2>/dev/null) == Y ]]; }
+link_local() { ip -6 addr show dev awdl0 scope link 2>/dev/null | grep -q inet6 && ! ip -6 addr show dev awdl0 | grep -q tentative; }
+on_channel_6() { iw dev "$MON" info 2>/dev/null | grep -q 'channel 6 '; }
+firewall() {
+    local pr present
+    for pr in "tcp 8771" "udp 5353"; do
+        set -- $pr
+        ip6tables -w 5 -C INPUT -i awdl0 -s fe80::/10 -p "$1" --dport "$2" -m comment --comment awdl-coex -j ACCEPT 2>/dev/null
+        present=$?
+        if [[ $op == -I && $present != 0 ]] || [[ $op == -D && $present == 0 ]]; then
+            ip6tables -w 5 "$op" INPUT -i awdl0 -s fe80::/10 -p "$1" --dport "$2" -m comment --comment awdl-coex -j ACCEPT
+        fi
+    done
+}
+# Own locally administered address, derived from the station's: the firmware ACKs only frames sent
+# to the LISTENER context's address, and the driver refuses a monitor on the station's address.
+awdl_mac() {
+    awk -F: '{printf "%02x:%s:%s:%s:%s:%02x", or(strtonum("0x"$1),2), $2,$3,$4,$5, xor(strtonum("0x"$6),0x5a)}' \
+        "/sys/class/net/$WLAN/address"
+}
+
+make_monitor() {
+    if [[ ! -e /sys/class/net/$MON ]]; then
+        iw dev "$WLAN" interface add "$MON" type monitor || return 1
+        ip link set "$MON" address "$(awdl_mac)" || return 1
+    fi
+    ip link set "$MON" up
+}
+
+prepare() {
+    coex || return 0
+    for _ in {1..20}; do [[ -e /sys/class/net/$WLAN ]] && break; sleep 0.5; done
+    [[ -e /sys/class/net/$WLAN ]] || { echo "$WLAN assente: niente preparazione." >&2; return 0; }
+    make_monitor && { on_channel_6 || iw dev "$MON" set channel 6; } \
+        || echo "awdlmon non preparato: il primo avvio staccherà il Wi-Fi per qualche secondo." >&2
+    return 0
+}
+
+# ExecStartPre of awdl-coex-radio.service: monitor on channel 6 and firewall, before the engine starts.
+setup() {
+    coex || { echo "Driver Wi-Fi + AirDrop non caricato (iwlwifi awdl_coex=1)." >&2; return 2; }
+    [[ -x $RADIO ]] || { echo "Manca $RADIO." >&2; return 2; }
+    make_monitor || return 1
+    if ! on_channel_6 && ! iw dev "$MON" set channel 6 2>/dev/null; then
+        # cfg80211 changes a monitor's channel only while nothing else runs: the station leaves for
+        # a few seconds. awdl-coex-boot.service avoids this at boot; awdlmon then keeps channel 6.
+        local uuid rc
+        uuid=$(nmcli -g GENERAL.CON-UUID device show "$WLAN" 2>/dev/null)
+        nmcli device set "$WLAN" managed no; ip link set "$WLAN" down
+        iw dev "$MON" set channel 6; rc=$?
+        ip link set "$WLAN" up; nmcli device set "$WLAN" managed yes; sleep 2
+        [[ -n $uuid && $uuid != -- ]] && nmcli --wait 30 connection up uuid "$uuid" ifname "$WLAN" >/dev/null
+        (( rc == 0 )) || { echo "Canale 6 rifiutato per awdlmon." >&2; return 1; }
+    fi
+    op=-I firewall
+}
+
+# ExecStopPost of awdl-coex-radio.service.
+teardown() {
+    op=-D firewall
+    return 0
+}
+
+start() {
+    coex || { echo "Driver Wi-Fi + AirDrop non caricato (iwlwifi awdl_coex=1)." >&2; return 2; }
+    systemctl is-active --quiet "$UNIT" && return 5
+    systemctl reset-failed "$UNIT" 2>/dev/null
+    systemctl start "$UNIT" || return 1
+    for _ in {1..40}; do link_local && return 0; sleep 0.5; done
+    echo "awdl0 non pronta: journalctl -u $UNIT" >&2
+    return 1
+}
+
+stop() {
+    systemctl stop "$UNIT" 2>/dev/null
+    return 0
+}
+
+status() {
+    local visible=false reason=stopped
+    if ! coex; then reason=no_coex_driver
+    elif systemctl is-active --quiet "$UNIT" && link_local; then visible=true reason=ok
+    elif systemctl is-active --quiet "$UNIT"; then reason=waking
+    fi
+    printf '{"visible":%s,"reason":"%s"}\n' "$visible" "$reason"
+}
+
+case ${1:-} in
+    prepare) prepare ;;
+    setup) setup ;;
+    teardown) teardown ;;
+    start) start ;;
+    stop) stop ;;
+    status) status ;;
+    *) echo "uso: $0 prepare|setup|teardown|start|stop|status" >&2; exit 64 ;;
+esac

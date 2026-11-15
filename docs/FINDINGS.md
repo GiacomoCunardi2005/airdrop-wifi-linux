@@ -103,7 +103,56 @@ router on 5 GHz channel 100 (DFS, 80 MHz). Phone: iPhone 16 Pro, iOS 27. All fro
   Owly's state is idle, Wi-Fi stays connected and an external HTTPS request succeeds after UI installation.
   These are UI/installation checks, not simultaneous AirDrop/Internet or phone-transfer evidence.
 
+## 11. Coexistence loader stopped before the radio test (22:51 CET)
+- The first native Owly attempt stopped at `insmod iwlmvm.ko: File exists`, before creating a monitor
+  or starting AirDrop. Under `pipefail`, `lsmod | grep -q` returned 141 even though the module existed:
+  the early reader exit caused SIGPIPE in `lsmod` (reproduced in 20/20 read-only checks).
+- Module presence now uses `/sys/module/iwlmvm`; removal retries for up to five seconds before insertion.
+  A regression test models the failed pipeline and checks removal before insertion.
+- Reconnection now activates the saved NetworkManager connection UUID, instead of relying on generic
+  device activation. The failed attempt recovered Wi-Fi; the leftover rollback timer was stopped and
+  external HTTPS worked. These changes fix test setup/recovery, not AirDrop coexistence itself.
+- Validated 13 Python tests, shell syntax and patch whitespace after the loader/reconnection changes.
+
+## 12. First AirDrop receive with the station connected (2026-11-15, 13:21–13:25 CET)
+- Root cause of the failed discovery in §8: `awdlmon` inherited the station MAC, so the firmware LISTENER context
+  had no address of its own to ACK. ForbiddenItlwm notes that ACKs must match the MAC context's address.
+- Fix: the test gives `awdlmon` a locally administered address (first octet `| 0x02`, last octet `^ 0x5a`
+  of the station MAC) before bringing it up. With `awdl_coex=1` the driver now refuses a monitor on the station
+  address (`-EADDRINUSE`) and logs the listener address.
+- Loader fix: `modprobe --remove iwlmvm` also removed the patched, now unused `iwlwifi`, so `insmod iwlmvm.ko`
+  failed with `Unknown symbol` (00:28 attempt). Replaced by an `rmmod iwlmvm` retry and an `iwlwifi` presence check.
+- Modules must be built with `LLVM=1`: the CachyOS kernel is built with clang.
+- Result with `AIRDROP=owly awdl-coex-test`: the iPhone listed the PC and sent two photos, both **1,952,650 bytes**,
+  both decoded completely as 4032×3024 JPEGs. Station on 5 GHz channel 112 (80 MHz), listener on channel 6.
+- During the 170 s receive window: gateway 163/170 replies (4.1% loss), external host 163/170 (4.1% loss);
+  average RTT about 250 ms with peaks of 2.3 s (time sharing between the two channels). No deauthentication
+  of `wlan0` between the reconnect after the channel-6 setup and the final teardown. No firmware errors.
+- Owly counters: `tx_unicast 1803`, `rx_data 3093`, `delivered 3068`, `gave up 0`.
+- Not yet measured: setup still drops the station for a few seconds (cfg80211 `EBUSY` workaround, step 3b);
+  latency under load; larger files; PC → iPhone; repeated runs.
+
+## 13. Tray start with the station connected: Wi-Fi lost (2026-11-15, 13:38–13:40 CET)
+- `coex-session start` (from the tray) had to take the station down to set channel 6 (cfg80211 `EBUSY`).
+  After the station came back, NetworkManager's scan stayed pending for 25 s (`ssid-not-found`,
+  `Reject scan trigger since one is already pending`). Wi-Fi only reconnected after the engine was
+  stopped (13:40:41). The awdl-coex-test run of §12 reconnected in about 2 s on the same sequence.
+- Meanwhile the panel ran `pkexec omdrop-discoverable peers` (the exclusive backend, root) every 2 s.
+  Whether that blocks scans is unproven. In coex mode `peers` now answers `[]` without touching the card.
+- Mitigation: `awdl-coex-boot.service` prepares awdlmon on channel 6 before NetworkManager connects, so
+  starting never takes the station down; the fallback waits 2 s before reconnecting, as the test did.
+- Open: whether the station can scan, roam and reconnect while the AWDL engine is running.
+
+## 14. Suspend with the AWDL monitor up kills Wi-Fi until the driver is reloaded (2026-11-15, 14:00 CET)
+- Boot with `awdl-coex-boot.service`: awdlmon prepared on channel 6 at 13:45:32, station associated at
+  13:46:30. Preparing the monitor before NetworkManager works.
+- Suspend at 14:00:39 with awdlmon up: `WARNING net/mac80211/pm.c:173` (chanctx list not empty),
+  `Timeout entering D3`, `fast suspend: trans_d3_suspend failed -110`. On resume `ieee80211_reconfig` hit
+  `WARNING mvm/mld-mac.c:257` (`Adding active MAC`, -EIO) for the monitor. Afterwards every
+  authentication timed out and scans stayed pending, even with awdlmon down. Only a driver reload helps.
+- Fix: `awdl-coex-sleep` (system-sleep hook) stops the engine and deletes awdlmon before sleep, prepares it
+  again after resume and restarts the engine if it was running. Not yet tested across a suspend.
+
 ## Open
-- Receive a file while connected. First investigate discovery with the paired radio and `awdl0` captures
-  from `AIRDROP=1 awdl-coex-test`; distinguish local announcements from radio transmission and peer responses.
-- Getting the firmware to ACK for the listener context (peer stations / IBSS-like context next to the station).
+- Remove the short disconnect during setup (set the monitor channel without taking the station down).
+- Reduce latency during sessions (channel time quotas); repeat runs; larger files; sending.

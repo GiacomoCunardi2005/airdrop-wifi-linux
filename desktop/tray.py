@@ -22,6 +22,11 @@ class Tray:
         )
         self.indicator.set_title("AirDrop — Owly / Omdrop")
         self.menu = Gtk.Menu()
+        # Which radio mode a reception would use, from the loaded driver.
+        self.mode_item = Gtk.MenuItem(label="")
+        self.mode_item.set_sensitive(False)
+        self.menu.append(self.mode_item)
+        self.menu.append(Gtk.SeparatorMenuItem())
         self.item = Gtk.MenuItem(label="Apri AirDrop…")
         self.item.connect("activate", self.open_panel)
         self.menu.append(self.item)
@@ -29,6 +34,17 @@ class Tray:
         self.indicator.set_menu(self.menu)
         self.indicator.set_secondary_activate_target(self.item)
         self.indicator.set_status(Indicator.IndicatorStatus.ACTIVE)
+        self.update_mode()
+        GLib.timeout_add_seconds(5, self.update_mode)
+
+    def update_mode(self):
+        try:
+            coex = Path("/sys/module/iwlwifi/parameters/awdl_coex").read_text().strip() == "Y"
+        except OSError:
+            coex = False
+        self.mode_item.set_label("Wi-Fi + AirDrop insieme" if coex else "AirDrop esclusivo: scollega il Wi-Fi")
+        self.indicator.set_title("AirDrop — Wi-Fi resta connesso" if coex else "AirDrop — Owly / Omdrop")
+        return True
 
     def error(self, text):
         dialog = Gtk.MessageDialog(

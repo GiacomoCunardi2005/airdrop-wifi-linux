@@ -1,0 +1,18 @@
+[Unit]
+Description=AirDrop radio next to the connected Wi-Fi (Owly AWDL engine on awdlmon)
+# Needs the coexistence driver; with the stock driver this unit stays inactive.
+ConditionPathExists=/sys/module/iwlwifi/parameters/awdl_coex
+# awdlmon is prepared before NetworkManager; the engine starts once the Wi-Fi is up.
+After=awdl-coex-boot.service network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+ExecStartPre=/usr/local/lib/awdl-coex/coex-session setup
+ExecStart=/usr/local/lib/awdl-coex/coex-radio
+ExecStopPost=/usr/local/lib/awdl-coex/coex-session teardown
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

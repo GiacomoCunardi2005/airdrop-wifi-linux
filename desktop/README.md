@@ -45,10 +45,55 @@ Opening the UI only reads status. Before a panel command can start the radio,
 explicit confirmation that Wi-Fi disconnects. Failed probes block startup.
 Stopping and rescheduling a live session keep the backend's normal behavior.
 Continuous reception is Omdrop's **Until I turn it off** mode, not boot recovery.
-On the lab AX211, simultaneous AirDrop and Wi-Fi remains unproven.
+On the lab AX211, simultaneous AirDrop and Wi-Fi works with the coexistence driver (below).
 
 Disable the indicator with `systemctl --user disable --now omdrop-tray.service`.
 This closes the UI only; turn reception off in the panel to release the radio.
+
+## Wi-Fi + AirDrop insieme (coexistence driver)
+
+With the patched driver loaded (`iwlwifi awdl_coex=1`, see `patches/README.md`) the tray
+receives **without disconnecting Wi-Fi**. `omdrop.py` detects the driver and then:
+
+- `on` / `toggle`: `pkexec coex-session start` brings up `awdlmon` (own AWDL MAC, channel 6) and
+  Owly's AWDL engine (`awdl0`); `coex-receive.py` runs `owly receive --fixed-channel` as a user unit.
+  Each offer appears as a GNOME notification with **Sì / No**, kept on screen; unanswered
+  after 13 s it is withdrawn and the offer declined. Durations, "one file" and
+  "until I turn it off" work as before.
+- Name, download folder and audience come from Omdrop's settings. Only **Everyone** is supported here;
+  Contacts Only is refused with a message. Sending is not available in this mode yet.
+- `off` stops the receiver and the engine; `awdlmon` stays up on channel 6. `awdl-coex-boot.service`
+  creates it at boot, before NetworkManager connects, so receiving never takes the station down.
+  Without that service (or if it fails) the first start of a boot drops Wi-Fi for a few seconds.
+- The tray menu shows the mode in use: "Wi-Fi + AirDrop insieme" or "AirDrop esclusivo".
+
+Without the driver, the original exclusive path and its Wi-Fi warning are unchanged.
+
+**Always on.** After `install-coex` AirDrop is on at every boot and stays visible until it is turned
+off in the tray (it comes back at the next boot):
+
+- `awdl-coex-boot.service` puts `awdlmon` on channel 6 before NetworkManager connects;
+- `awdl-coex-radio.service` (system, enabled) runs Owly's AWDL engine once the network is online;
+- `omdrop-coex-receive.service` (user, enabled) runs the receiver from login, reading name and folder
+  from Omdrop; it restarts by itself when the radio comes back after a suspend;
+- the `awdl-coex` system-sleep hook removes the monitor before suspend and restores it after: a monitor
+  left up across suspend broke Wi-Fi until the driver was reloaded (docs/FINDINGS.md §14);
+- turning the radio on or off by hand from the tray asks for your password (pkexec); turning only the
+  receiver on or off while the radio runs doesn't.
+
+**Kernel updates.** The patched driver is a DKMS package (`dkms/dkms.conf`, source in
+`/usr/src/iwlwifi-awdl-coex-7.3`): pacman's DKMS hook rebuilds it for every new 7.3.x kernel.
+On a 7.4 kernel DKMS skips it on purpose and the stock driver loads; the tray then shows
+"AirDrop esclusivo" until the patch is ported.
+
+Install (asks for sudo and installs the `dkms` package; Wi-Fi drops once only if the patched driver
+isn't loaded yet):
+
+```bash
+desktop/install-coex
+```
+
+`desktop/install-coex --remove` removes everything and puts the stock driver back.
 
 ## Discovery comparison
 

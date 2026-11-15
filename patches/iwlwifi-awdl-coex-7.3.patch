@@ -119,10 +119,30 @@ index 5bd246e..63d5056 100644
  
  	/* Handle binding during CSA */
 diff --git a/drivers/net/wireless/intel/iwlwifi/mvm/mld-mac80211.c b/drivers/net/wireless/intel/iwlwifi/mvm/mld-mac80211.c
-index 6ea9a7c..37c6432 100644
+index 6ea9a7c..ae6c844 100644
 --- a/drivers/net/wireless/intel/iwlwifi/mvm/mld-mac80211.c
 +++ b/drivers/net/wireless/intel/iwlwifi/mvm/mld-mac80211.c
-@@ -81,7 +81,9 @@ static int iwl_mvm_mld_mac_add_interface(struct ieee80211_hw *hw,
+@@ -14,6 +14,19 @@ static int iwl_mvm_mld_mac_add_interface(struct ieee80211_hw *hw,
+ 
+ 	guard(mvm)(mvm);
+ 
++	/* awdl_coex: the firmware ACKs only frames sent to a MAC context's own
++	 * address. A listener on the station's address gets no ACKs of its own,
++	 * so the iPhone never lists us. Require a separate AWDL address.
++	 */
++	if (iwlwifi_mod_params.awdl_coex && vif->type == NL80211_IFTYPE_MONITOR) {
++		if (ether_addr_equal(vif->addr, mvm->nvm_data->hw_addr)) {
++			IWL_ERR(mvm, "awdl_coex: monitor %pM shares the station address, set its own MAC first\n",
++				vif->addr);
++			return -EADDRINUSE;
++		}
++		IWL_ERR(mvm, "awdl_coex: listener address %pM\n", vif->addr);
++	}
++
+ 	iwl_mvm_mac_init_mvmvif(mvm, mvmvif);
+ 
+ 	mvmvif->mvm = mvm;
+@@ -81,7 +94,9 @@ static int iwl_mvm_mld_mac_add_interface(struct ieee80211_hw *hw,
  
  	if (vif->type == NL80211_IFTYPE_MONITOR) {
  		mvm->monitor_on = true;
@@ -133,7 +153,7 @@ index 6ea9a7c..37c6432 100644
  	}
  
  	if (!test_bit(IWL_MVM_STATUS_IN_HW_RESTART, &mvm->status))
-@@ -190,6 +192,22 @@ __iwl_mvm_mld_assign_vif_chanctx(struct iwl_mvm *mvm,
+@@ -190,6 +205,22 @@ __iwl_mvm_mld_assign_vif_chanctx(struct iwl_mvm *mvm,
  	if (WARN_ON_ONCE(!mvmvif->link[link_id]))
  		return -EINVAL;
  

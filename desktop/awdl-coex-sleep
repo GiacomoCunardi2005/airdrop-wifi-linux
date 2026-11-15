@@ -1,0 +1,22 @@
+#!/bin/bash
+# systemd-sleep hook for "Wi-Fi + AirDrop insieme" (installed in /usr/lib/systemd/system-sleep/).
+# An AWDL monitor holding a channel context across suspend makes mac80211 warn (pm.c: chanctx_list not
+# empty), the card fails to enter D3, and on resume iwlmvm finds the monitor's MAC context still
+# uploaded (-EIO): Wi-Fi stays dead until the driver is reloaded (2026-11-15, 14:00 suspend).
+# So the monitor goes away before sleep and comes back after, with the engine if it was running.
+SESSION=/usr/local/lib/awdl-coex/coex-session
+FLAG=/run/awdl-coex-was-running
+[[ $(cat /sys/module/iwlwifi/parameters/awdl_coex 2>/dev/null) == Y ]] || exit 0
+case $1 in
+    pre)
+        rm -f "$FLAG"
+        systemctl is-active --quiet awdl-coex-radio && touch "$FLAG"
+        "$SESSION" stop
+        iw dev awdlmon del 2>/dev/null
+        ;;
+    post)
+        "$SESSION" prepare
+        [[ -e $FLAG ]] && { rm -f "$FLAG"; "$SESSION" start >/dev/null 2>&1 & }
+        ;;
+esac
+exit 0
