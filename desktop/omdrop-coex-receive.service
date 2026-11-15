@@ -6,7 +6,7 @@ StartLimitIntervalSec=0
 [Service]
 TimeoutStartSec=150
 ExecStartPre=/bin/sh -c 'for i in $(seq 1 120); do ip -6 addr show dev awdl0 scope link 2>/dev/null | grep -q inet6 && exit 0; sleep 1; done; exit 1'
-ExecStart=/usr/bin/python3 %h/.local/share/omdrop-tray/coex-receive.py
+ExecStart=/usr/bin/python3 /usr/lib/awdl-coex/coex-receive.py
 # Restarts after a radio restart (resume, awdl0 recreated); a "one file" window ends with 0 and stays off.
 Restart=on-failure
 RestartSec=5

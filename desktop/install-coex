@@ -1,21 +1,11 @@
 #!/bin/bash
-# Installs "Wi-Fi + AirDrop insieme": AirDrop always on, next to the connected Wi-Fi.
-# Run as the desktop user; asks for sudo.
-#   1. the patched iwlwifi via DKMS (dkms/dkms.conf): rebuilt for every 7.3.x kernel update
-#   2. awdl-coex-boot.service  awdlmon on channel 6 before NetworkManager connects
-#      awdl-coex-radio.service Owly's AWDL engine, enabled: on at every boot
-#      system-sleep hook       monitor removed before suspend (one left up breaks Wi-Fi on resume)
-#   3. omdrop-coex-receive.service (user, enabled): visible from login until turned off in the tray
-# Loading the patched driver the first time drops Wi-Fi once for a few seconds.
-# --remove puts the stock driver back (the tray then falls back to exclusive mode).
+# Installs "Wi-Fi + AirDrop insieme" through the pacman package (packaging/arch), plus the GNOME tray
+# when this user has the Omdrop panel. Run as the desktop user from a clone; asks for sudo.
+# Same as `cd packaging/arch && makepkg -si`, then starting it now instead of after a reboot.
+# --remove uninstalls the package and puts the stock driver back.
 set -euo pipefail
-cd "$(dirname -- "$0")"
-SRC=${SRC:-$HOME/awdl-diag/linux-coex/drivers/net/wireless/intel/iwlwifi}
-RADIO=${COEX_RADIO:-$HOME/awdl-diag/owly/target/release/examples/coex-radio}
-PKG=iwlwifi-awdl-coex/7.3
-USRC=/usr/src/iwlwifi-awdl-coex-7.3
-LIB=/usr/local/lib/awdl-coex
-CONF=/etc/modprobe.d/awdl-coex.conf
+REPO=$(cd "$(dirname -- "$0")/.." && pwd)
+PKG=airdrop-wifi-coex
 TRAY=~/.local/share/omdrop-tray
 
 coex() { [[ $(cat /sys/module/iwlwifi/parameters/awdl_coex 2>/dev/null) == Y ]]; }
@@ -26,58 +16,44 @@ reload() {
     echo "Wi-Fi non ancora riconnesso: controlla NetworkManager." >&2
 }
 
-if [[ ${1:-} == --remove ]]; then
+# Earlier versions of this script installed by hand; pacman refuses files it doesn't own.
+remove_manual() {
     systemctl --user disable --now omdrop-coex-receive.service 2>/dev/null || true
-    rm -f ~/.config/systemd/user/omdrop-coex-receive.service
-    systemctl --user daemon-reload
+    rm -f ~/.config/systemd/user/omdrop-coex-receive.service ~/.config/systemd/user/default.target.wants/omdrop-coex-receive.service
     sudo systemctl disable --now awdl-coex-radio.service awdl-coex-boot.service 2>/dev/null || true
     sudo rm -f /etc/systemd/system/awdl-coex-radio.service /etc/systemd/system/awdl-coex-boot.service \
-        /usr/lib/systemd/system-sleep/awdl-coex "$CONF"
-    sudo systemctl daemon-reload
-    sudo dkms remove "$PKG" --all 2>/dev/null || true
-    sudo rm -rf "$USRC" /lib/modules/*/updates/awdl-coex
+        /etc/modprobe.d/awdl-coex.conf
+    sudo rm -rf /usr/local/lib/awdl-coex /lib/modules/*/updates/awdl-coex
+    if ! pacman -Qq "$PKG" &>/dev/null; then
+        sudo dkms remove iwlwifi-awdl-coex/7.3 --all 2>/dev/null || true
+        sudo rm -rf /usr/src/iwlwifi-awdl-coex-7.3 /usr/lib/systemd/system-sleep/awdl-coex
+    fi
+}
+
+if [[ ${1:-} == --remove ]]; then
+    remove_manual
+    pacman -Qq "$PKG" &>/dev/null && sudo pacman -R --noconfirm "$PKG"
     sudo depmod -a
     reload
     echo "Driver originale ripristinato."
     exit 0
 fi
 
-[[ -x $RADIO ]] || { echo "Compila prima coex-radio (experiments/README.md)." >&2; exit 1; }
-[[ -f $SRC/mvm/mld-mac80211.c ]] || { echo "Sorgente del driver modificato assente: $SRC" >&2; exit 1; }
-grep -q awdl_coex "$SRC/iwl-modparams.h" || { echo "$SRC non contiene la patch awdl_coex." >&2; exit 1; }
+remove_manual
+(cd "$REPO/packaging/arch" && makepkg -sif --noconfirm)
 
-# 1. Driver through DKMS. The source only (no build files), root-owned in /usr/src.
-sudo pacman -S --needed --noconfirm dkms
-sudo dkms remove "$PKG" --all 2>/dev/null || true
-sudo rm -rf "$USRC" /lib/modules/*/updates/awdl-coex
-(cd "$SRC" && find . -type f \( -name '*.c' -o -name '*.h' -o -name Makefile -o -name Kconfig \) -print0 \
-    | sudo xargs -0 -I{} install -D -m 644 -o root -g root {} "$USRC/{}")
-sudo install -m 644 -o root -g root ../dkms/dkms.conf "$USRC/dkms.conf"
-sudo dkms install "$PKG" -k "$(uname -r)"
-echo 'options iwlwifi awdl_coex=1' | sudo tee "$CONF" >/dev/null
+# The tray is per user (Omdrop + Quickshell live in the home directory).
+if [[ -d $TRAY ]]; then
+    install -m755 "$REPO/desktop/omdrop.py" "$REPO/desktop/tray.py" "$TRAY/"
+    cp -a "$REPO/desktop/qml" "$TRAY/"
+    systemctl --user restart omdrop-tray.service 2>/dev/null || true
+fi
 
-# 2. Root side. Transient units of earlier versions are stopped first: same names.
-sudo systemctl stop awdl-coex-radio.service 2>/dev/null || true
-sudo install -d -m 755 -o root -g root "$LIB"
-sudo install -m 755 -o root -g root coex-session "$LIB/coex-session"
-sudo install -m 755 -o root -g root "$RADIO" "$LIB/coex-radio"
-sudo install -m 644 -o root -g root awdl-coex-boot.service awdl-coex-radio.service /etc/systemd/system/
-sudo install -m 755 -o root -g root awdl-coex-sleep /usr/lib/systemd/system-sleep/awdl-coex
-sudo systemctl daemon-reload
-sudo systemctl enable awdl-coex-boot.service awdl-coex-radio.service
-
-# 3. User side.
-systemctl --user stop omdrop-coex-receive.service 2>/dev/null || true
-install -m 755 omdrop.py coex-receive.py "$TRAY/"
-install -m 644 tray.py "$TRAY/tray.py"
-cp -a qml "$TRAY/"
-install -Dm644 omdrop-coex-receive.service ~/.config/systemd/user/omdrop-coex-receive.service
+# Now rather than at the next boot. The first load of the patched driver drops Wi-Fi for a few seconds.
+coex || reload
+coex || { echo "Driver coex non attivo: vedi dmesg | grep awdl_coex (riavvia se il driver era in uso)." >&2; exit 1; }
 systemctl --user daemon-reload
 systemctl --user enable omdrop-coex-receive.service
-
-coex || reload
-coex || { echo "Driver coex non attivo dopo il ricaricamento: vedi dmesg | grep awdl_coex" >&2; exit 1; }
-sudo systemctl start awdl-coex-radio.service
+sudo systemctl start awdl-coex-boot.service awdl-coex-radio.service
 systemctl --user start omdrop-coex-receive.service
-systemctl --user restart omdrop-tray.service
-echo "Installato: AirDrop acceso con il Wi-Fi connesso, anche a ogni avvio, finché non lo spegni dal tray."
+echo "Installato: AirDrop acceso con il Wi-Fi connesso, anche a ogni avvio, finché non lo spegni."

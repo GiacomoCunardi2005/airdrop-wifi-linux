@@ -17,6 +17,27 @@ firmware 89), CachyOS, kernel 7.3.4, iPhone 16 Pro on iOS 27.
 | Send PC → iPhone, large files, long-term stability | Not tested |
 | Original Owly demo panel on GNOME | Available in [desktop/](desktop/README.md); simultaneous Wi-Fi remains unproven |
 
+## Install on a PC like this one
+
+ThinkPad-class laptop with the **Intel AX211 (PCI `8086:7e40`)**, CachyOS with a **7.3.x** kernel, GNOME:
+
+```bash
+git clone https://github.com/GiacomoCunardi2005/airdrop-wifi-linux.git
+cd airdrop-wifi-linux/packaging/arch
+makepkg -si
+sudo reboot
+```
+
+The package `airdrop-wifi-coex` builds the patched `iwlwifi` through DKMS (rebuilt for every 7.3.x kernel
+update), Owly's AWDL engine and receiver, and enables the services: after the reboot AirDrop is on, visible
+as the computer's host name, and the Wi-Fi stays connected. Files go to `~/Downloads`; each offer appears as
+a GNOME notification with **Sì / No**. Turn it off until the next boot with
+`systemctl --user stop omdrop-coex-receive`. Uninstall with `sudo pacman -R airdrop-wifi-coex` and reboot.
+
+With an Omdrop panel already set up (`desktop/README.md`), `desktop/install-coex` does the same and also
+updates the tray, without a reboot. Other Wi-Fi cards or kernel series: the stock driver loads and nothing
+changes; see Warnings before trying.
+
 ## Why this is hard
 
 AirDrop runs over AWDL, Apple's peer-to-peer Wi-Fi link, on channels 6 / 44 / 149. A Linux receiver has to:

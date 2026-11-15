@@ -1,0 +1,63 @@
+# AirDrop from an iPhone with Wi-Fi staying connected, on the built-in Intel AX211.
+# Build from a clone of the repository:  cd packaging/arch && makepkg -si
+pkgname=airdrop-wifi-coex
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="AirDrop receive next to the connected Wi-Fi on Intel AX211 (patched iwlwifi via DKMS + Owly AWDL)"
+arch=(x86_64)
+url="https://github.com/GiacomoCunardi2005/airdrop-wifi-linux"
+license=('GPL-2.0-only' 'MIT')
+# The driver is built by DKMS with clang (LLVM=1), like the CachyOS kernel.
+depends=(dkms clang lld llvm linux-cachyos-headers iw iproute2 iptables networkmanager python libnotify glib2)
+makedepends=(git cargo)
+optdepends=('quickshell: the Omdrop panel opened from the GNOME tray (see desktop/README.md)')
+install=$pkgname.install
+# ring (via Owly) links C objects: gcc LTO bitcode breaks the Rust link.
+options=(!lto)
+_owly=21171d8f9a08bfa2c625a1fa338e877a67913e54   # Owly 0.4.3, the version tested
+source=("owly::git+https://github.com/t4t5/owly.git#commit=$_owly")
+sha256sums=('SKIP')
+
+_repo() { realpath "$startdir/../.."; }
+
+prepare() {
+    cd owly
+    git apply "$(_repo)/patches/owly-fixed-announce.patch"
+    install -Dm644 "$(_repo)/experiments/owly-coex-radio.rs" crates/owly-cli/examples/coex-radio.rs
+    cargo fetch --locked --target "$(rustc --print host-tuple)"
+}
+
+build() {
+    cd owly
+    cargo build --frozen --release -p owly-cli --bin owly --example coex-radio
+}
+
+package() {
+    local r d lib=usr/lib/awdl-coex src=usr/src/iwlwifi-awdl-coex-7.3
+    r=$(_repo); d=$r/desktop
+
+    # Driver source for DKMS; pacman's dkms hook builds it now and for every kernel update.
+    install -d "$pkgdir/$src"
+    cp -r --no-preserve=ownership "$r/dkms/iwlwifi/." "$pkgdir/$src/"
+    install -m644 "$r/dkms/dkms.conf" "$pkgdir/$src/dkms.conf"
+    install -Dm644 "$r/dkms/awdl-coex.conf" "$pkgdir/usr/lib/modprobe.d/awdl-coex.conf"
+
+    # Radio and receiver.
+    install -Dm755 owly/target/release/owly "$pkgdir/$lib/owly"
+    install -Dm755 owly/target/release/examples/coex-radio "$pkgdir/$lib/coex-radio"
+    install -Dm755 "$d/coex-session" "$pkgdir/$lib/coex-session"
+    install -Dm755 "$d/coex-receive.py" "$pkgdir/$lib/coex-receive.py"
+    install -Dm644 "$d/awdl-coex-boot.service" "$d/awdl-coex-radio.service" -t "$pkgdir/usr/lib/systemd/system/"
+    install -Dm644 "$d/omdrop-coex-receive.service" -t "$pkgdir/usr/lib/systemd/user/"
+    install -Dm755 "$d/awdl-coex-sleep" "$pkgdir/usr/lib/systemd/system-sleep/awdl-coex"
+
+    # Optional GNOME tray (needs a per-user Omdrop + Quickshell setup): copied by desktop/install-coex.
+    local t=$pkgdir/usr/share/$pkgname/tray
+    install -d "$t"
+    cp -r --no-preserve=ownership "$d/qml" "$d/licenses" "$d/mdns" "$t/"
+    install -m755 "$d/tray.py" "$d/omdrop.py" "$d/panel" "$d/install-coex" -t "$t/"
+    install -m644 "$d/omdrop-symbolic.svg" "$d/omdrop-tray.service" "$d/airdrop-mdns.service" "$d/README.md" -t "$t/"
+
+    install -Dm644 "$r/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    install -Dm644 owly/LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE.owly"
+}

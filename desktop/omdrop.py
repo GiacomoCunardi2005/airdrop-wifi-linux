@@ -15,7 +15,7 @@ import time
 
 HERE = Path(__file__).resolve().parent
 COEX_PARAM = Path("/sys/module/iwlwifi/parameters/awdl_coex")
-COEX_SESSION = os.environ.get("OMDROP_COEX_SESSION", "/usr/local/lib/awdl-coex/coex-session")
+COEX_SESSION = os.environ.get("OMDROP_COEX_SESSION", "/usr/lib/awdl-coex/coex-session")
 RECEIVE_UNIT = "omdrop-coex-receive"
 WINDOW_UNIT = "omdrop-coex-window"
 STATE = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "omdrop-coex.json"

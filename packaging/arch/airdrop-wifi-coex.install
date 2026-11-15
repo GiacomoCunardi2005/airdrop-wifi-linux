@@ -1,0 +1,28 @@
+# Enabled at install: AirDrop is on from the next boot until it is turned off.
+post_install() {
+    systemctl daemon-reload
+    systemctl enable awdl-coex-boot.service awdl-coex-radio.service
+    systemctl --global enable omdrop-coex-receive.service
+    cat <<'MSG'
+==> airdrop-wifi-coex: reboot to load the patched Wi-Fi driver (iwlwifi awdl_coex=1).
+    After the reboot AirDrop is on and visible as this computer's host name, files go to ~/Downloads.
+    Each offer appears as a notification with Sì / No.
+    Turn it off until the next boot:  systemctl --user stop omdrop-coex-receive
+    Only for the Intel AX211 (PCI 8086:7e40) on a 7.3.x kernel; otherwise the stock driver loads.
+MSG
+}
+
+post_upgrade() {
+    systemctl daemon-reload
+}
+
+pre_remove() {
+    systemctl disable --now awdl-coex-radio.service awdl-coex-boot.service 2>/dev/null
+    systemctl --global disable omdrop-coex-receive.service 2>/dev/null
+    return 0
+}
+
+post_remove() {
+    systemctl daemon-reload
+    echo "==> airdrop-wifi-coex: reboot to load the stock Wi-Fi driver again."
+}

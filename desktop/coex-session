@@ -1,7 +1,7 @@
 #!/bin/bash
 # Root side of "Wi-Fi + AirDrop insieme": an AWDL monitor next to the connected station.
 # Needs iwlwifi/iwlmvm built from patches/iwlwifi-awdl-coex-7.3.patch, loaded with awdl_coex=1.
-# Installed root-owned in /usr/local/lib/awdl-coex/ and run through pkexec by desktop/omdrop.py.
+# Installed root-owned in /usr/lib/awdl-coex/ and run through pkexec by desktop/omdrop.py.
 #   start   start awdl-coex-radio.service (Owly's AWDL engine, awdl0); 5 = already running
 #   setup / teardown   the service's ExecStartPre / ExecStopPost: monitor, channel 6, firewall
 #   prepare at boot, before NetworkManager: awdlmon up on channel 6 while the station is still down,

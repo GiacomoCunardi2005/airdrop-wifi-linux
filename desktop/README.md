@@ -81,19 +81,19 @@ off in the tray (it comes back at the next boot):
 - turning the radio on or off by hand from the tray asks for your password (pkexec); turning only the
   receiver on or off while the radio runs doesn't.
 
-**Kernel updates.** The patched driver is a DKMS package (`dkms/dkms.conf`, source in
-`/usr/src/iwlwifi-awdl-coex-7.3`): pacman's DKMS hook rebuilds it for every new 7.3.x kernel.
+**Kernel updates.** The patched driver is a DKMS package (`dkms/dkms.conf`, source `dkms/iwlwifi`,
+installed in `/usr/src/iwlwifi-awdl-coex-7.3`): pacman's DKMS hook rebuilds it for every new 7.3.x kernel.
 On a 7.4 kernel DKMS skips it on purpose and the stock driver loads; the tray then shows
 "AirDrop esclusivo" until the patch is ported.
 
-Install (asks for sudo and installs the `dkms` package; Wi-Fi drops once only if the patched driver
-isn't loaded yet):
+Install: the pacman package `packaging/arch` (see the top-level README), or, with this tray set up,
 
 ```bash
 desktop/install-coex
 ```
 
-`desktop/install-coex --remove` removes everything and puts the stock driver back.
+which removes an earlier manual installation, builds and installs the package, updates the tray and
+starts AirDrop now. `desktop/install-coex --remove` uninstalls it and puts the stock driver back.
 
 ## Discovery comparison
 

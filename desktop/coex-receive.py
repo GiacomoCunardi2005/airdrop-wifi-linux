@@ -13,7 +13,8 @@ import sys
 import threading
 import time
 
-OWLY = os.environ.get("OWLY", os.path.expanduser("~/awdl-diag/owly/target/release/owly"))
+# The packaged Owly build (with receive --fixed-channel); OWLY overrides it for a lab checkout.
+OWLY = os.environ.get("OWLY", "/usr/lib/awdl-coex/owly")
 PROMPT = "accept? [y/N] "
 
 

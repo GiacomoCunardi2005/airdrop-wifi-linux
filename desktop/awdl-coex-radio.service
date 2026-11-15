@@ -8,9 +8,9 @@ Wants=network-online.target
 StartLimitIntervalSec=0
 
 [Service]
-ExecStartPre=/usr/local/lib/awdl-coex/coex-session setup
-ExecStart=/usr/local/lib/awdl-coex/coex-radio
-ExecStopPost=/usr/local/lib/awdl-coex/coex-session teardown
+ExecStartPre=/usr/lib/awdl-coex/coex-session setup
+ExecStart=/usr/lib/awdl-coex/coex-radio
+ExecStopPost=/usr/lib/awdl-coex/coex-session teardown
 Restart=on-failure
 RestartSec=5
 
