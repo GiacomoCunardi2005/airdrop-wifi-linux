@@ -153,6 +153,23 @@ router on 5 GHz channel 100 (DFS, 80 MHz). Phone: iPhone 16 Pro, iOS 27. All fro
 - Fix: `awdl-coex-sleep` (system-sleep hook) stops the engine and deletes awdlmon before sleep, prepares it
   again after resume and restarts the engine if it was running. Not yet tested across a suspend.
 
+## 15. Broadcom BCM4352 (`14e4:43b1`): no driver can meet the contract (2026-11-15)
+Checked on a second machine (Dell, BCM4352 802.11ac PCIe, Debian 13, kernel 6.12.74) without loading any
+module or touching the radio. Result: not possible, neither coexistence nor Owly's exclusive mode.
+- **`wl` (broadcom-sta 6.30.223.271, the driver in use):** `iw phy` lists only `IBSS` and `managed`, and
+  "interface combinations are not supported". Its only monitor is the proprietary `/proc/brcm_monitor0`
+  switch: receive-only, on the associated channel, no injection, no TX status, no second MAC. It fails
+  contract points 2, 3 and 5. The driver is a closed binary blob, so it can't be patched.
+- **`b43`:** the module has the alias for this 802.11 core (`bcma ... id0812rev2A`), but the chip uses the
+  AC PHY, and `CONFIG_B43_PHY_AC` depends on `BROKEN` (absent from the distribution config). Even with it,
+  b43 is a single-channel SoftMAC with no interface combinations and closed ucode, so points 2 and 3 fail.
+- **`brcmsmac`:** no alias for this core revision. **`brcmfmac`:** no PCI ID for 43b1; the BCM4352 has no
+  offload CPU, so there is no FullMAC firmware (and no Nexmon target) to patch.
+- No existing Linux AirDrop/AWDL project (Owly, OWL, OpenDrop) supports it: all need monitor mode with
+  injection.
+- Way forward for such a laptop: swap the card (an Intel AX210 fits a non-CNVi M.2 slot; the AX211 is
+  CNVi-only) or use a USB adapter in exclusive mode.
+
 ## Open
 - Remove the short disconnect during setup (set the monitor channel without taking the station down).
 - Reduce latency during sessions (channel time quotas); repeat runs; larger files; sending.

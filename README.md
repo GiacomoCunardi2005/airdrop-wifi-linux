@@ -70,6 +70,7 @@ line are what matter. Only the kernel driver differs per card; everything else i
 | Card | Driver | Status | What's needed |
 |---|---|---|---|
 | BCM43xx (FullMAC) | `brcmfmac` | ❌ | Monitor mode and injection are inside the firmware |
+| BCM4352 (`14e4:43b1`) | `wl` (proprietary) / `b43` | ❌ | Checked: `wl` has no monitor vif or injection, `b43` has no working AC PHY ([FINDINGS §15](docs/FINDINGS.md)). Swap the card |
 
 Everything other than ✅ is untested. To move a card forward, follow the test protocol in
 [docs/PORTING.md](docs/PORTING.md) and open an issue or pull request with what each step measured, failures
