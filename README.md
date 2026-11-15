@@ -1,4 +1,4 @@
-# easy-airdrop-linux
+# airdrop-wifi-linux
 
 Goal: make AirDrop from an iPhone to a Linux PC **easy**, using the Wi-Fi card the PC already has,
 and without losing the Internet connection while it runs.
@@ -11,11 +11,10 @@ firmware 89), CachyOS, kernel 7.3.4, iPhone 16 Pro on iOS 27.
 
 | What | Status |
 |---|---|
-| Receive a photo from an iPhone (iOS 27), Wi-Fi **disconnected** during the session | **Works** with [Owly](https://github.com/t4t5/owly) in exclusive mode (`scripts/airdrop-owly`) |
 | Radio hears AWDL **while the station stays connected** to the router | **Works** with the experimental driver patch: 40/40 pings to the gateway, 46 AWDL frames in 20 s |
 | Receive a file **while Wi-Fi stays connected** | **Works, always on**: patched driver via DKMS plus `desktop/install-coex`. AirDrop is on from boot until turned off in the tray, consent as a GNOME notification; received across a reboot with no Wi-Fi disconnect. Gateway latency rises while the AWDL engine shares the radio |
 | Send PC → iPhone, large files, long-term stability | Not tested |
-| Original Owly demo panel on GNOME | Available in [desktop/](desktop/README.md); simultaneous Wi-Fi remains unproven |
+| Original Owly demo panel on GNOME | Available in [desktop/](desktop/README.md); shows "Wi-Fi + AirDrop insieme" with the patched driver |
 
 ## Install on a PC like this one
 
@@ -54,17 +53,16 @@ must provide; the rest of this repository works unchanged with any driver that m
 
 ## What is in here
 
-- `scripts/airdrop-owly` — the receive path that works today (takes the Wi-Fi card for up to 5 minutes).
-- `scripts/awdl-coex-test` — loads the patched driver, puts a monitor on channel 6 next to the connected station,
-  measures ping + AWDL frames, then attempts to restore the stock modules and reconnect (plus a rollback timer).
-  `AIRDROP=1` runs a real receive attempt with OWL/OpenDrop; `AIRDROP=owly` runs the
-  [Owly comparison](experiments/README.md). Both capture `awdl0` and the monitor radio locally and measure
-  gateway plus external Internet reachability.
-- `scripts/airdrop-ricevi`, `scripts/airdrop-conferma`, `scripts/awdl-diag` — the earlier OWL + OpenDrop path and
-  diagnostics (monitor-only, no ACKs: the phone contacts the PC but never lists it on this card).
-- `patches/` — the experimental `iwlwifi` patch (GPL-2.0), see `patches/README.md`.
-- `desktop/` — the original Omdrop panel shown in Owly's demo, hosted on GNOME;
-  receive/stop controls, duration, contacts, peer radar, sending and settings.
+- `packaging/arch/` — the pacman package `airdrop-wifi-coex` (install section above).
+- `dkms/` — the patched `iwlwifi` source (GPL-2.0) and its `dkms.conf`; `patches/` has the same change as a diff.
+- `owly/` — the Owly patch and the `coex-radio` adapter the package builds (MIT).
+- `desktop/` — services, the root helper `coex-session`, the receiver with GNOME consent, the suspend hook,
+  and the original Omdrop panel hosted on GNOME (`desktop/README.md`).
+- `scripts/awdl-coex-test` — lab test for driver work: loads a patched driver for one run, puts a monitor
+  next to the connected station, measures ping and AWDL frames, `AIRDROP=owly` also receives; restores the
+  stock modules afterwards (rollback timer included). Used by the porting test protocol.
+- `docs/` — [FINDINGS.md](docs/FINDINGS.md) (what was measured, including dead ends) and
+  [PORTING.md](docs/PORTING.md) (other Wi-Fi chips).
 
 Script messages are in Italian.
 
@@ -72,8 +70,9 @@ Script messages are in Italian.
 
 - The driver experiment can crash the Wi-Fi firmware or panic the kernel. It happened here. Save your work,
   and enable EFI pstore (`efi_pstore.pstore_disable=0`) if you want the trace.
-- Owly installs a root D-Bus service and a polkit rule that lets any program in your local session take the
-  Wi-Fi radio without a password. Read it before you keep it.
+- This package doesn't install Owly's own daemon. The tray's exclusive fallback (stock driver) uses a full
+  Owly install, which adds a root D-Bus service and a polkit rule letting any program in your local session
+  take the Wi-Fi radio without a password. Read it before you keep it.
 - Never run `sudo` in a context without a TTY in a loop: three failures lock the account for 10 minutes (`pam_faillock`).
 
 ## Credits
@@ -83,4 +82,4 @@ Script messages are in Italian.
 [1raad1/airdrop-linux](https://github.com/1raad1/airdrop-linux), [t4t5/owly](https://github.com/t4t5/owly),
 [ForbiddenItlwm](https://github.com/retropineaple/ForbiddenItlwm) (the listener-context idea).
 
-Scripts and docs: MIT. Kernel patch: GPL-2.0. Owly patch: MIT; see `patches/README.md`.
+Scripts and docs: MIT. Kernel patch: GPL-2.0. Owly patch and adapter: MIT; see `owly/README.md`.

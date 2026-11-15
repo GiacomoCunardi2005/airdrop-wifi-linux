@@ -1,6 +1,0 @@
-#!/bin/bash
-# Hook AIRDROP_CONFIRM per OpenDrop: $1 = mittente, $2 = file/link. Exit 0 = accetta.
-# Fail-closed: se zenity manca o la finestra viene chiusa, rifiuta.
-command -v zenity >/dev/null || exit 1
-timeout 25 zenity --question --title="AirDrop" \
-    --text="Ricevere da: ${1}\n\n${2}" --ok-label="Accetta" --cancel-label="Rifiuta"

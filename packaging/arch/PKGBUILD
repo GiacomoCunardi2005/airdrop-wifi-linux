@@ -22,8 +22,8 @@ _repo() { realpath "$startdir/../.."; }
 
 prepare() {
     cd owly
-    git apply "$(_repo)/patches/owly-fixed-announce.patch"
-    install -Dm644 "$(_repo)/experiments/owly-coex-radio.rs" crates/owly-cli/examples/coex-radio.rs
+    git apply "$(_repo)/owly/fixed-announce.patch"
+    install -Dm644 "$(_repo)/owly/coex-radio.rs" crates/owly-cli/examples/coex-radio.rs
     cargo fetch --locked --target "$(rustc --print host-tuple)"
 }
 
@@ -54,9 +54,9 @@ package() {
     # Optional GNOME tray (needs a per-user Omdrop + Quickshell setup): copied by desktop/install-coex.
     local t=$pkgdir/usr/share/$pkgname/tray
     install -d "$t"
-    cp -r --no-preserve=ownership "$d/qml" "$d/licenses" "$d/mdns" "$t/"
+    cp -r --no-preserve=ownership "$d/qml" "$d/licenses" "$t/"
     install -m755 "$d/tray.py" "$d/omdrop.py" "$d/panel" "$d/install-coex" -t "$t/"
-    install -m644 "$d/omdrop-symbolic.svg" "$d/omdrop-tray.service" "$d/airdrop-mdns.service" "$d/README.md" -t "$t/"
+    install -m644 "$d/omdrop-symbolic.svg" "$d/omdrop-tray.service" "$d/README.md" -t "$t/"
 
     install -Dm644 "$r/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
     install -Dm644 owly/LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE.owly"

@@ -6,8 +6,6 @@ file sending, computer name and destination controls are upstream's code.
 The GNOME indicator opens that panel. Its middle-click shortcut opens it directly;
 with a normal click, select **Apri AirDrop…**.
 
-![Original Omdrop panel running on GNOME](panel.png)
-
 The panel calls the installed Omdrop backend. The three Omarchy host components
 (`Panel`, `KeyboardPanel`, `BarIconButton`) are replaced with a small standalone
 host. GNOME doesn't implement layer-shell, so the popup uses XWayland. It opens
@@ -94,37 +92,6 @@ desktop/install-coex
 
 which removes an earlier manual installation, builds and installs the package, updates the tray and
 starts AirDrop now. `desktop/install-coex --remove` uninstalls it and puts the stock driver back.
-
-## Discovery comparison
-
-The installed Omdrop Python path announces periodically through `omdrop-owl`'s
-root supervisor, but it doesn't run a query responder. Owly's native receive
-path also answers mDNS questions. In the 22:27 lab attempt the radio heard the
-phone, but the receiver logged no requests. This difference is a **hypothesis**
-for failed discovery, not a proven diagnosis.
-
-`experiments/owly-mdns.rs` reuses Owly's mDNS implementation with the existing
-lease, address, service ID, port, and hostname. It never acquires the radio or
-changes the receiver's acceptance policy. The user service starts with the
-receiver and stops when that receiver stops. For a controlled comparison:
-
-```bash
-install -m644 experiments/owly-mdns.rs \
-  ~/awdl-diag/owly/crates/owly-cli/examples/owly-mdns.rs
-cargo build --manifest-path ~/awdl-diag/owly/Cargo.toml --locked --release \
-  -p owly-cli --example owly-mdns
-install -m755 ~/awdl-diag/owly/target/release/examples/owly-mdns \
-  ~/.local/share/omdrop-tray/owly-mdns
-install -m755 desktop/mdns ~/.local/share/omdrop-tray/
-install -Dm644 desktop/airdrop-mdns.service ~/.config/systemd/user/airdrop-mdns.service
-systemctl --user daemon-reload
-systemctl --user enable airdrop-mdns.service
-```
-
-Then start reception from the panel and check `journalctl --user -u airdrop-mdns`.
-The extra responder is installed/enabled in the lab, but a new file transfer
-through this path has not been verified. Disable it with
-`systemctl --user disable --now airdrop-mdns.service` to restore the comparison.
 
 ## Source and verification
 
