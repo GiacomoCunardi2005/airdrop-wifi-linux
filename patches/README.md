@@ -1,5 +1,7 @@
 # iwlwifi AWDL coexistence patch (experimental)
 
+Porting it to another driver: see [docs/PORTING.md](../docs/PORTING.md).
+
 `iwlwifi-awdl-coex-7.3.patch` applies to the Linux 7.3 tree (built against CachyOS 7.3.4). It is derived from the
 kernel's iwlwifi driver and is therefore **GPL-2.0**.
 

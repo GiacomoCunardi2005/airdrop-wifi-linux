@@ -6,7 +6,7 @@
 # So the monitor goes away before sleep and comes back after, with the engine if it was running.
 SESSION=/usr/lib/awdl-coex/coex-session
 FLAG=/run/awdl-coex-was-running
-[[ $(cat /sys/module/iwlwifi/parameters/awdl_coex 2>/dev/null) == Y ]] || exit 0
+grep -qx Y /sys/module/*/parameters/awdl_coex 2>/dev/null || exit 0
 case $1 in
     pre)
         rm -f "$FLAG"

@@ -8,7 +8,7 @@ REPO=$(cd "$(dirname -- "$0")/.." && pwd)
 PKG=airdrop-wifi-coex
 TRAY=~/.local/share/omdrop-tray
 
-coex() { [[ $(cat /sys/module/iwlwifi/parameters/awdl_coex 2>/dev/null) == Y ]]; }
+coex() { grep -qx Y /sys/module/*/parameters/awdl_coex 2>/dev/null; }
 reload() {
     sudo modprobe -r iwlmvm iwlwifi
     sudo modprobe iwlmvm

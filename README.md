@@ -49,6 +49,9 @@ AirDrop runs over AWDL, Apple's peer-to-peer Wi-Fi link, on channels 6 / 44 / 14
 
 See [docs/FINDINGS.md](docs/FINDINGS.md) for what was measured, in order, including the dead ends.
 
+**Other Wi-Fi chips:** [docs/PORTING.md](docs/PORTING.md) explains, for humans and AI agents, what a driver
+must provide; the rest of this repository works unchanged with any driver that meets it.
+
 ## What is in here
 
 - `scripts/airdrop-owly` — the receive path that works today (takes the Wi-Fi card for up to 5 minutes).

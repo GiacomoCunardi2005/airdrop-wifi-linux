@@ -38,10 +38,12 @@ class Tray:
         GLib.timeout_add_seconds(5, self.update_mode)
 
     def update_mode(self):
-        try:
-            coex = Path("/sys/module/iwlwifi/parameters/awdl_coex").read_text().strip() == "Y"
-        except OSError:
-            coex = False
+        coex = False
+        for param in Path("/sys/module").glob("*/parameters/awdl_coex"):
+            try:
+                coex = coex or param.read_text().strip() == "Y"
+            except OSError:
+                pass
         self.mode_item.set_label("Wi-Fi + AirDrop insieme" if coex else "AirDrop esclusivo: scollega il Wi-Fi")
         self.indicator.set_title("AirDrop — Wi-Fi resta connesso" if coex else "AirDrop — Owly / Omdrop")
         return True

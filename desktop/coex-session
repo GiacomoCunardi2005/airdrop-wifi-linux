@@ -1,6 +1,6 @@
 #!/bin/bash
 # Root side of "Wi-Fi + AirDrop insieme": an AWDL monitor next to the connected station.
-# Needs iwlwifi/iwlmvm built from patches/iwlwifi-awdl-coex-7.3.patch, loaded with awdl_coex=1.
+# Needs a Wi-Fi driver implementing docs/PORTING.md, loaded with awdl_coex=1 (iwlwifi: patches/).
 # Installed root-owned in /usr/lib/awdl-coex/ and run through pkexec by desktop/omdrop.py.
 #   start   start awdl-coex-radio.service (Owly's AWDL engine, awdl0); 5 = already running
 #   setup / teardown   the service's ExecStartPre / ExecStopPost: monitor, channel 6, firewall
@@ -14,7 +14,7 @@ MON=awdlmon
 RADIO=$(dirname -- "$(readlink -f -- "$0")")/coex-radio
 UNIT=awdl-coex-radio
 
-coex() { [[ $(cat /sys/module/iwlwifi/parameters/awdl_coex 2>/dev/null) == Y ]]; }
+coex() { grep -qx Y /sys/module/*/parameters/awdl_coex 2>/dev/null; }
 link_local() { ip -6 addr show dev awdl0 scope link 2>/dev/null | grep -q inet6 && ! ip -6 addr show dev awdl0 | grep -q tentative; }
 on_channel_6() { iw dev "$MON" info 2>/dev/null | grep -q 'channel 6 '; }
 firewall() {
@@ -54,7 +54,7 @@ prepare() {
 
 # ExecStartPre of awdl-coex-radio.service: monitor on channel 6 and firewall, before the engine starts.
 setup() {
-    coex || { echo "Driver Wi-Fi + AirDrop non caricato (iwlwifi awdl_coex=1)." >&2; return 2; }
+    coex || { echo "Driver Wi-Fi + AirDrop non caricato (awdl_coex=1)." >&2; return 2; }
     [[ -x $RADIO ]] || { echo "Manca $RADIO." >&2; return 2; }
     make_monitor || return 1
     if ! on_channel_6 && ! iw dev "$MON" set channel 6 2>/dev/null; then
@@ -78,7 +78,7 @@ teardown() {
 }
 
 start() {
-    coex || { echo "Driver Wi-Fi + AirDrop non caricato (iwlwifi awdl_coex=1)." >&2; return 2; }
+    coex || { echo "Driver Wi-Fi + AirDrop non caricato (awdl_coex=1)." >&2; return 2; }
     systemctl is-active --quiet "$UNIT" && return 5
     systemctl reset-failed "$UNIT" 2>/dev/null
     systemctl start "$UNIT" || return 1

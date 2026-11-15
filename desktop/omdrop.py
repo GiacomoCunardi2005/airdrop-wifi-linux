@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 """Forward the original panel's commands, checking Wi-Fi impact before startup.
 
-With the coexistence driver loaded (iwlwifi awdl_coex=1) receiving runs next to the connected
+With a coexistence driver loaded (awdl_coex=1, see docs/PORTING.md) receiving runs next to the connected
 station instead: coex-session (root, via pkexec) brings up the AWDL radio, coex-receive.py runs
 Owly's receiver. Settings (name, folder, audience, sound) still come from Omdrop.
 """
@@ -14,7 +14,6 @@ import sys
 import time
 
 HERE = Path(__file__).resolve().parent
-COEX_PARAM = Path("/sys/module/iwlwifi/parameters/awdl_coex")
 COEX_SESSION = os.environ.get("OMDROP_COEX_SESSION", "/usr/lib/awdl-coex/coex-session")
 RECEIVE_UNIT = "omdrop-coex-receive"
 WINDOW_UNIT = "omdrop-coex-window"
@@ -22,10 +21,14 @@ STATE = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "o
 
 
 def coex_driver():
-    try:
-        return COEX_PARAM.read_text().strip() == "Y"
-    except OSError:
-        return False
+    """Any Wi-Fi module implementing docs/PORTING.md exposes parameters/awdl_coex (iwlwifi today)."""
+    for param in Path("/sys/module").glob("*/parameters/awdl_coex"):
+        try:
+            if param.read_text().strip() == "Y":
+                return True
+        except OSError:
+            pass
+    return False
 
 
 def real_cli():
