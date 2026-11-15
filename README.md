@@ -5,7 +5,7 @@ connected to your network**. No extra adapter, no dongle. AirDrop is on from boo
 
 It works on one kind of machine so far: the **Intel AX211** Wi-Fi card (PCI `8086:7e40`, found in Intel
 Meteor Lake laptops such as the ThinkPad E16 Gen 2) running **CachyOS** with a **7.3.x** kernel and GNOME.
-Other cards: see [Other Wi-Fi cards](#other-wi-fi-cards).
+Other cards: see [Supported Wi-Fi cards](#supported-wi-fi-cards).
 
 ## Does it work?
 
@@ -22,6 +22,58 @@ Verified on the test machine (kernel 7.3.4, firmware 89, iPhone 16 Pro on iOS 27
 
 While AirDrop is on, the Wi-Fi card shares its time between your network and AirDrop: latency to the router
 goes from a few ms to about 20 ms, and to about 250 ms during a transfer. Normal browsing is fine.
+
+## Supported Wi-Fi cards
+
+Find yours with `lspci -nnk | grep -A3 -i network`: the `[8086:7e40]`-style ID and the "Kernel driver in use"
+line are what matter. Only the kernel driver differs per card; everything else is shared
+([docs/PORTING.md](docs/PORTING.md)).
+
+✅ works, verified on hardware · 🟡 same driver path as a working card, should be a small port, untested ·
+⚪ not started · ❌ unlikely to be possible
+
+### Intel (`iwlwifi`)
+
+| Card | Driver / op mode | Status | What's needed |
+|---|---|---|---|
+| AX211, Meteor Lake CNVi (`8086:7e40`) | `iwlmvm`, MLD firmware API | ✅ Works | — |
+| AX211 / AX411 on other CNVi platforms (Alder Lake, Raptor Lake…) | `iwlmvm` | 🟡 | Allow the PCI ID in the device guard (`trans.c`, `mac80211.c`), run the test protocol |
+| AX210 (`8086:2725`) | `iwlmvm` | 🟡 | Same as above |
+| AX200 (`8086:2723`), AX201, AX101 | `iwlmvm`, possibly the older non-MLD firmware API | ⚪ | Check `mld_api=` in the log; the legacy path in the patch is untested |
+| 9260, 9560, 8265, older | `iwlmvm`, older firmware | ⚪ | Unknown whether the firmware keeps a listener next to the station |
+| BE200 (`8086:272b`), BE201, BE202 (Wi-Fi 7) | `iwlmld` (new op mode) | ⚪ | The patch has to be rewritten for `mld/`; the contract stays the same |
+
+### MediaTek (`mt76`)
+
+| Card | Driver | Status | What's needed |
+|---|---|---|---|
+| MT7921, MT7922 | `mt7921e` | ⚪ | Check active monitor (hardware ACKs) and a monitor on another channel next to the station. Prior art: [jedbillyb/airdrop-mt7921](https://github.com/jedbillyb/airdrop-mt7921) |
+| MT7925 (Wi-Fi 7) | `mt7925e` | ⚪ | Same questions as MT7921 |
+
+### Realtek (`rtw89`, `rtw88`)
+
+| Card | Driver | Status | What's needed |
+|---|---|---|---|
+| RTL8852AE, RTL8852BE, RTL8852CE, RTL8922AE | `rtw89` | ⚪ | Multi-channel concurrency (MCC) with a per-port MAC. Prior art on macOS: [AirPort_RTW89](https://github.com/FranciumOS-org/AirPort_RTW89) |
+| RTL8822CE, RTL8821CE | `rtw88` | ⚪ | Unknown |
+
+### Qualcomm Atheros (`ath10k`, `ath11k`, `ath12k`)
+
+| Card | Driver | Status | What's needed |
+|---|---|---|---|
+| QCA6174 | `ath10k` | ⚪ | Unknown |
+| QCA6390, WCN6855 / QCNFA765 | `ath11k` | ⚪ | A vdev with its own MAC and channel next to the station (as for AP+STA) |
+| WCN7850 / FastConnect 7800 (Wi-Fi 7) | `ath12k` | ⚪ | Same as `ath11k` |
+
+### Broadcom (`brcmfmac`)
+
+| Card | Driver | Status | What's needed |
+|---|---|---|---|
+| BCM43xx (FullMAC) | `brcmfmac` | ❌ | Monitor mode and injection are inside the firmware |
+
+Everything other than ✅ is untested. To move a card forward, follow the test protocol in
+[docs/PORTING.md](docs/PORTING.md) and open an issue or pull request with what each step measured, failures
+included.
 
 ## Install
 

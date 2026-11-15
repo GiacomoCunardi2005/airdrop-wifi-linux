@@ -73,7 +73,8 @@ address, PHY and binding. Its `docs/HOW-IT-WORKS.md` lists firmware behaviour le
 
 ## Hints for other drivers (unverified)
 
-None of these has been tested here. Treat each one as a hypothesis to measure.
+None of these has been tested here. Treat each one as a hypothesis to measure. The per-card status lives in
+the README's [Supported Wi-Fi cards](../README.md#supported-wi-fi-cards) table: update it with every port.
 
 - **mt76 (MediaTek mt7921/mt7922):** check `NL80211_MNTR_FLAG_ACTIVE` first. An *active* monitor ACKs in
   hardware and might already satisfy point 3. The open question is point 2: a monitor on another channel
